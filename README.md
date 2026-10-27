@@ -10,7 +10,6 @@ No build step. Everything is static files; Three.js is vendored in `vendor/`.
 ## Editing
 
 - **Projects, links, status and screenshots:** `js/projects.js` (one file feeds both modes).
-- **Screenshots:** `assets/shots/`. `seraph-placeholder.jpg` is placeholder art; replace it with a real screenshot and keep the name, or update the paths in `js/projects.js` and `js/world.js`.
 - **The world:** `js/world.js`. Houses, people and screens are built in code (no model files), so it stays small.
 
 ## Running locally

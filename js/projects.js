@@ -132,7 +132,7 @@ export const PROJECTS = [
     tags: ['Game', 'Godot 4', 'Mobile'],
     accent: '#f28c28',
     icon: '🛡️',
-    cover: 'assets/shots/bridge-defender-title.jpg',
+    cover: 'assets/shots/bridge-defender-gameplay.jpg',
     description: [
       'A portrait-mode (720×1280) phone game made in Godot. You defend a bridge turn by turn, choosing between three weapon cards to attack or block, ' +
         'merging gear, opening chests and collecting loot between battles in the Town.',
@@ -150,7 +150,10 @@ export const PROJECTS = [
       { date: 'Next', title: 'Forest boss and UI redesign', text: 'Close the five-level Forest loop and redo the UI for more screen sizes.' },
     ],
     links: [],
-    gallery: [{ src: 'assets/shots/bridge-defender-title.jpg', caption: 'Title art', kind: 'phone' }],
+    gallery: [
+      { src: 'assets/shots/bridge-defender-gameplay.jpg', caption: 'Forest level 1: skeletons crossing toward the bridge', kind: 'phone' },
+      { src: 'assets/shots/bridge-defender-title.jpg', caption: 'Title art', kind: 'phone' },
+    ],
     world: 'On the vertical second monitor of the kid upstairs, and on a phone at the bus stop.',
   },
   {
@@ -162,8 +165,7 @@ export const PROJECTS = [
     tags: ['Game', 'Godot 4', 'RPG'],
     accent: '#8b7cf6',
     icon: '🪽',
-    cover: 'assets/shots/seraph-placeholder.jpg',
-    placeholder: true,
+    cover: 'assets/shots/seraph-gameplay.jpg',
     description: [
       'Seraph is a 2D-isometric tactical action RPG made in Godot. Fight with weapon sets and abilities, block, swap loadouts, and pray at shrines.',
       'Prototype builds exist for Windows and Linux; public downloads are coming soon.',
@@ -175,7 +177,7 @@ export const PROJECTS = [
     ],
     timeline: [{ date: 'Oct 2026', title: 'First prototype builds', text: 'Windows and Linux builds published with automatic releases.' }],
     links: [],
-    gallery: [{ src: 'assets/shots/seraph-placeholder.jpg', caption: 'Placeholder image: a real screenshot is coming', kind: 'desktop' }],
+    gallery: [{ src: 'assets/shots/seraph-gameplay.jpg', caption: 'The Paladin in a torch-lit dungeon, with the ability bar and combat log', kind: 'desktop' }],
     world: 'On the second kid’s computer upstairs, in the shared bedroom.',
   },
   {

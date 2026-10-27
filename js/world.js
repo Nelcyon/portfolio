@@ -647,8 +647,8 @@ function busStop() {
   // B: standing, playing Bridge Defender
   const b = person({ hands: 'phone', shirt: 0xf97316, pants: 0x334155, skin: SKIN[0], hair: 0x8b5a2b });
   p.add(b, 0.9, 0, 0.15, -0.35);
-  tag(b, 'bridge-defender', 'bridge-defender-portrait.jpg');
-  tag(givePhone(b, 'bridge-defender-portrait.jpg'), 'bridge-defender', 'bridge-defender-portrait.jpg');
+  tag(b, 'bridge-defender', 'bridge-defender-gameplay.jpg');
+  tag(givePhone(b, 'bridge-defender-gameplay.jpg'), 'bridge-defender', 'bridge-defender-gameplay.jpg');
   p.collider(0.9, 0.15, 0.25, 0.25, 0, 1.8);
   // C: waiting, looking down the street for the bus
   const cc = person({ shirt: 0x0f766e, pants: 0x3f3f46, skin: SKIN[3], hair: 0x1c1917 });
@@ -799,9 +799,9 @@ function house1(x, z, rot) {
   const m1 = monitor(0.6, 0.34, 'roadway-desktop.jpg');
   h.add(m1, -2.35, upY + 0.76, -4.05);
   tag(m1, 'roadway-rivals', 'roadway-desktop.jpg');
-  const m2 = monitor(0.3, 0.53, 'bridge-defender-portrait.jpg', 0.1);
+  const m2 = monitor(0.3, 0.53, 'bridge-defender-gameplay.jpg', 0.1);
   h.add(m2, -1.3, upY + 0.76, -4.05, -0.25);
-  tag(m2, 'bridge-defender', 'bridge-defender-portrait.jpg');
+  tag(m2, 'bridge-defender', 'bridge-defender-gameplay.jpg');
   h.add(chair(0xdc2626), -2.0, upY, -3.15, Math.PI);
   const kid1 = person({ s: 0.74, pose: 'sit', hands: 'desk', shirt: 0x22c55e, pants: 0x1e3a8a, skin: SKIN[0], hair: 0xd4a017, seatH: 0.5, handReach: 0.45, handY: 0.8 });
   h.add(kid1, -2.0, upY, -3.15, Math.PI);
@@ -809,13 +809,13 @@ function house1(x, z, rot) {
   // Kid 2: Seraph
   h.add(desk(h, 1.6, 0.75), 2.0, upY, -3.95);
   h.collider(2.0, -3.95, 0.8, 0.38, upY, upY + 0.8);
-  const m3 = monitor(0.6, 0.34, 'seraph-placeholder.jpg');
+  const m3 = monitor(0.6, 0.34, 'seraph-gameplay.jpg');
   h.add(m3, 2.0, upY + 0.76, -4.05);
-  tag(m3, 'seraph', 'seraph-placeholder.jpg');
+  tag(m3, 'seraph', 'seraph-gameplay.jpg');
   h.add(chair(0x1d4ed8), 2.0, upY, -3.15, Math.PI);
   const kid2 = person({ s: 0.8, pose: 'sit', hands: 'desk', shirt: 0x9333ea, pants: 0x27272a, skin: SKIN[3], hair: 0x111111, seatH: 0.5, handReach: 0.45, handY: 0.8 });
   h.add(kid2, 2.0, upY, -3.15, Math.PI);
-  tag(kid2, 'seraph', 'seraph-placeholder.jpg');
+  tag(kid2, 'seraph', 'seraph-gameplay.jpg');
   // Two beds along the east wall
   for (const bz of [-0.9, 2.4]) {
     h.box(1.0, 0.45, 2.0, 4.85, upY + 0.22, bz, mat(0x7c5a3a), { collide: true });
