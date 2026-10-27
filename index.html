@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nelcyon Projects</title>
+  <meta name="description" content="Accessible tools and games by Nelcyon: BetterTalk, RubeCube, Family Card Table, Bridge Defender, Seraph and more." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" />
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="logo" href="index.html">Nelcyon</a>
+      <nav class="mode" aria-label="Site mode">
+        <a href="index.html" aria-current="page">Classic</a>
+        <a href="world.html">3D world</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1 id="owner-name">Tools and games<br />made for real people.</h1>
+      <p id="owner-blurb"></p>
+      <div class="cta">
+        <a class="btn primary" href="#projects">See the projects</a>
+        <a class="btn" href="world.html">Walk through the 3D cul-de-sac</a>
+      </div>
+    </section>
+
+    <section class="teaser" aria-label="3D world">
+      <div class="copy">
+        <h2>Or see them in use</h2>
+        <p>Step onto a quiet cul-de-sac. People at the bus stop play my games on their phones, and inside the houses my apps are on their screens. Walk in, look around, and click any screen to learn more.</p>
+        <a class="btn primary" href="world.html">Enter the 3D world</a>
+      </div>
+      <div class="art" aria-hidden="true">
+        <svg viewBox="0 0 400 260" preserveAspectRatio="xMidYMid slice">
+          <rect x="150" y="112" width="260" height="36" fill="#3b3e42" />
+          <circle cx="140" cy="130" r="62" fill="#3b3e42" />
+          <circle cx="140" cy="130" r="62" fill="none" stroke="#9a9a92" stroke-width="7" stroke-dasharray="320 70" stroke-dashoffset="-35" />
+          <g fill="#c9a77a">
+            <rect x="196" y="40" width="34" height="28" rx="3" /><rect x="110" y="18" width="34" height="28" rx="3" />
+            <rect x="32" y="112" width="30" height="34" rx="3" /><rect x="110" y="214" width="34" height="28" rx="3" />
+            <rect x="196" y="192" width="34" height="28" rx="3" />
+          </g>
+          <rect x="236" y="94" width="40" height="10" rx="2" fill="#7fb3ff" />
+          <circle cx="222" cy="102" r="4" fill="#e23b3b" />
+          <circle cx="232" cy="130" r="6" fill="#fff" />
+          <path d="M232 130 L222 104 L246 104 Z" fill="rgba(255,255,255,.25)" />
+        </svg>
+      </div>
+    </section>
+
+    <section id="projects">
+      <div class="section-head">
+        <h2>Projects</h2>
+        <div class="filters" role="group" aria-label="Filter projects"></div>
+      </div>
+      <div class="grid" id="grid"></div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>© <span id="year"></span> Nelcyon</span>
+      <a id="gh" href="https://github.com/Nelcyon">GitHub</a>
+    </div>
+  </footer>
+
+  <script type="module" src="js/site.js"></script>
+</body>
+</html>

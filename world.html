@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>The Cul-de-sac · Nelcyon</title>
+  <meta name="description" content="Walk a small 3D cul-de-sac where people use Nelcyon's apps and games." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@700&display=swap" />
+  <link rel="stylesheet" href="css/world.css" />
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div class="hud top-left">
+    <a class="pill" href="index.html">← Classic site</a>
+  </div>
+  <div class="hud top-right">
+    <button class="pill" id="menu-btn" type="button" aria-expanded="false">Go to a project ▾</button>
+    <div class="menu" id="menu" hidden></div>
+  </div>
+
+  <div id="crosshair" aria-hidden="true"></div>
+  <div id="hint" class="hint" hidden></div>
+
+  <div id="joystick" aria-hidden="true"><div class="knob"></div></div>
+
+  <section id="intro" class="overlay">
+    <div class="intro-card">
+      <h1>The Cul-de-sac</h1>
+      <p>You're standing in the street at the end of a quiet cul-de-sac. The people here use my apps and games. Walk up to them, go inside the houses, and click any screen or floating icon to learn about that project.</p>
+      <ul class="keys desktop-only">
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run</li>
+        <li>Mouse to look around · <kbd>Esc</kbd> to free the mouse</li>
+        <li>Click a screen or icon to open it</li>
+      </ul>
+      <ul class="keys touch-only">
+        <li>Left thumb: walk · drag anywhere else: look</li>
+        <li>Tap a screen or icon to open it</li>
+      </ul>
+      <button id="start" class="go" type="button">Step into the street</button>
+      <p class="loading" id="loading">Loading…</p>
+    </div>
+  </section>
+
+  <section id="panel" class="overlay" hidden>
+    <div class="panel-card" role="dialog" aria-modal="true" aria-labelledby="panel-title">
+      <button class="close" id="panel-close" type="button" aria-label="Close">×</button>
+      <div class="shot"><img id="panel-img" alt="" /></div>
+      <div class="panel-body">
+        <span class="badge" id="panel-status"></span>
+        <h2 id="panel-title"></h2>
+        <p id="panel-tagline"></p>
+        <p class="where" id="panel-where"></p>
+        <div class="panel-links" id="panel-links"></div>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="js/world.js"></script>
+</body>
+</html>
