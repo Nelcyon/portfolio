@@ -45,6 +45,23 @@ From [Poly Haven](https://polyhaven.com/models), all [CC0 1.0](https://creativec
 | `Rockingchair_01.glb` | Rocking chair on the porch | [Rocking Chair 01](https://polyhaven.com/a/Rockingchair_01) |
 | `throw_pillows_01.glb` | Pillows on the porch swing | [Throw Pillows 01](https://polyhaven.com/a/throw_pillows_01) |
 
+## People (`assets/people/`)
+
+Characters by [Quaternius](https://quaternius.com/), all [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (no attribution required; credited here anyway). Each file keeps only the first frame of the idle animation, and the code in `js/people.js` bends that into sitting, typing and phone poses. Colors of some clothes and hair are changed in code.
+
+| File | Who it is in the world | Source |
+| --- | --- | --- |
+| `mom.glb` | Mom on the living room sofa | [Ultimate Modular Women](https://quaternius.com/packs/ultimatemodularwomen.html), "Casual" |
+| `grandma.glb` | Grandma at the kitchen table | Ultimate Modular Women, "Formal" |
+| `daughter.glb` | The daughter at her desk | Ultimate Modular Women, "Punk" |
+| `bus_suit.glb` | Commuter standing at the bus stop | Ultimate Modular Women, "Suit" |
+| `dad.glb` | Dad in his wheelchair | [Ultimate Modular Men](https://quaternius.com/packs/ultimatemodularcharacters.html): Adventurer head, Casual hoodie, Casual 2 legs and shoes |
+| `grandpa.glb` | Grandpa on the porch swing | Ultimate Modular Men: King head without the crown, Casual 2 shirt, Suit legs and shoes |
+| `son.glb` | The son at his desk | Ultimate Modular Men: Beach head, Casual hoodie, legs and shoes |
+| `bus_punk.glb`, `bus_worker.glb`, `bus_farmer.glb` | Riders waiting for the bus | Ultimate Modular Men: "Punk", "Worker", "Farmer" |
+
+The women come from the pack's individual glTF files. The men pack's combined `Humans_Master.fbx` was split into these people by `tools/people_fbx.html`. Everything was then packed by `tools/people.mjs` (idle frame only, meshopt).
+
 ## Lighting and sky (`assets/hdri/`)
 
 - "Forest Slope" by Greg Zaal, [Poly Haven](https://polyhaven.com/a/forest_slope), [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
@@ -78,5 +95,5 @@ Also:
 
 ## Code
 
-- [three.js](https://threejs.org/) r160 and its glTF loader and meshopt decoder (`vendor/`), MIT License.
+- [three.js](https://threejs.org/) r160 and its glTF loader, meshopt decoder and SkeletonUtils (`vendor/`), MIT License.
 - Project screenshots in `assets/shots/` are from Nelcyon's own apps and games.
