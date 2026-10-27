@@ -117,8 +117,9 @@ export const PROJECTS = [
     links: [],
     gallery: [
       { src: 'assets/shots/roadway-title-phone.jpg', caption: 'Title screen', kind: 'phone' },
-      { src: 'assets/shots/roadway-phone.jpg', caption: 'A trip against Dusty', kind: 'phone' },
-      { src: 'assets/shots/roadway-desktop.jpg', caption: 'In a desktop browser', kind: 'desktop' },
+      { src: 'assets/shots/roadway-phone.jpg', caption: 'Racing Dusty through Monument Valley', kind: 'phone' },
+      { src: 'assets/shots/roadway-desktop.jpg', caption: 'On a PC', kind: 'desktop' },
+      { src: 'assets/shots/roadway-score-phone.jpg', caption: 'End-of-trip score', kind: 'phone' },
     ],
     world: 'On a phone at the bus stop, and on the computer of the kid upstairs, who is playing against the person at the bus stop.',
   },
