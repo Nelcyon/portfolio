@@ -8,7 +8,6 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PROJECTS, projectById } from './projects.js';
@@ -86,21 +85,45 @@ sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
-new EXRLoader().load('assets/hdri/forest.exr', (t) => {
-  t.mapping = THREE.EquirectangularReflectionMapping;
+// Image-based light: Poly Haven's Forest Slope, packed as RGBE in a plain PNG (top half
+// RGB, bottom half the shared exponent; see tools/hdr2png.py) so any host can serve it.
+new THREE.ImageLoader().load('assets/hdri/forest_slope.png', (img) => {
+  const w = img.width, h = img.height / 2;
+  const c = document.createElement('canvas'); c.width = w; c.height = h * 2;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0);
+  const px = g.getImageData(0, 0, w, h * 2).data;
+  const half = new Uint16Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const f = Math.pow(2, px[(w * h + i) * 4] - 136);
+    for (let k = 0; k < 3; k++) half[i * 4 + k] = THREE.DataUtils.toHalfFloat(px[i * 4 + k] * f);
+    half[i * 4 + 3] = 0x3c00; // 1.0
+  }
+  const t = new THREE.DataTexture(half, w, h, THREE.RGBAFormat, THREE.HalfFloatType);
+  Object.assign(t, { flipY: true, mapping: THREE.EquirectangularReflectionMapping, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, generateMipmaps: false, needsUpdate: true });
   scene.environment = pmrem.fromEquirectangular(t).texture;
   t.dispose();
 });
 
-// Sky dome: hazy light overhead through the canopy, sinking into the dark at the horizon
+// Sky dome: the upper half of the same Forest Slope panorama (2K, tonemapped), so the
+// gaps in the canopy show real treetops and sky, sinking into the dark at the horizon.
 {
+  const skyTex = new THREE.TextureLoader().load('assets/hdri/forest_slope_sky.jpg');
+  skyTex.wrapS = THREE.RepeatWrapping;
   const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(280, 32, 16),
+    new THREE.SphereGeometry(280, 48, 24),
     new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { top: { value: new THREE.Color(0xbdd3e6) }, mid: { value: new THREE.Color(0x56675d) }, low: { value: new THREE.Color(0x000000) } },
+      uniforms: { map: { value: skyTex }, mid: { value: new THREE.Color(0x56675d) }, low: { value: new THREE.Color(0x000000) } },
       vertexShader: 'varying vec3 vp; void main(){ vp = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'uniform vec3 top, mid, low; varying vec3 vp; void main(){ float h = vp.y; vec3 c = h > 0.12 ? mix(mid, top, smoothstep(0.12, 0.75, h)) : mix(low, mid, smoothstep(-0.05, 0.12, h)); gl_FragColor = vec4(c, 1.0); }',
+      fragmentShader: `uniform sampler2D map; uniform vec3 mid, low; varying vec3 vp;
+        void main(){
+          float h = vp.y;
+          vec2 uv = vec2(atan(vp.z, vp.x) * 0.15915494 + 0.5, clamp(asin(clamp(h, 0.0, 1.0)) * 0.63661977, 0.002, 0.998));
+          vec3 top = texture2D(map, uv).rgb;
+          vec3 c = h > 0.12 ? mix(mid, top, smoothstep(0.12, 0.4, h)) : mix(low, mid, smoothstep(-0.05, 0.12, h));
+          gl_FragColor = vec4(c, 1.0);
+        }`,
     }),
   );
   sky.renderOrder = -1;
@@ -111,7 +134,7 @@ new EXRLoader().load('assets/hdri/forest.exr', (t) => {
 // ---------------------------------------------------------------------------
 // Textures and materials
 //
-// Surface textures are generated tileable PBR maps (see assets/CREDITS.md). Materials
+// Surface textures are photo-scanned Poly Haven maps (see assets/CREDITS.md). Materials
 // that use them carry userData.uv = [meters per tile across, meters per tile up]
 // and boxes built with them get world-scaled UVs, so boards and tiles line up.
 
@@ -161,26 +184,26 @@ function paint(color) {
   return paintCache.get(color);
 }
 function carpet(color) {
-  const m = pbr('carpet', [1.2, 1.2], { mat: { color, roughness: 1 } });
+  const m = pbr('carpet', [0.6, 0.6], { mat: { color, roughness: 1 } });
   return m;
 }
 
 const M = {
-  siding: pbr('siding', [1.6, 0.8], { mat: { roughness: 0.8 } }),
-  sidingGray: pbr('siding', [1.6, 0.8], { mat: { color: 0x8e9aa0, roughness: 0.8 } }),
-  shingle: pbr('shingle', [2, 2], { mat: { roughness: 0.9 } }),
-  planks: pbr('planks', [2.4, 2.4], { mat: { roughness: 0.5 } }),
-  deck: pbr('planks', [2.4, 2.4], { mat: { color: 0x9a8a78, roughness: 0.8 } }),
-  tile: pbr('tile', [1.2, 1.2], { mat: { roughness: 0.25 } }),
-  concrete: pbr('concrete', [2, 2]),
-  gravel: pbr('gravel', [1.6, 1.6], { mat: { roughness: 1 } }),
-  asphalt: pbr('asphalt', [5, 5], { mat: { roughness: 0.9, roughnessMap: ptex('asphalt_rgh.jpg', false) } }),
+  siding: pbr('siding', [1.57, 1.57], { mat: { color: 0xd8c8b8, roughness: 0.8 } }),
+  sidingGray: pbr('siding', [1.57, 1.57], { mat: { color: 0xe0ecf2, roughness: 0.8 } }),
+  shingle: pbr('shingle', [3, 3], { mat: { roughness: 0.9 } }),
+  planks: pbr('planks', [1.7, 1.7], { mat: { roughness: 0.45 } }),
+  deck: pbr('deck', [1.8, 1.8], { mat: { color: 0xb8a898, roughness: 0.75 } }),
+  tile: pbr('tile', [1.9, 1.9], { mat: { roughness: 1, roughnessMap: ptex('tile_rgh.jpg', false) } }),
+  concrete: pbr('concrete', [2.5, 2.5]),
+  gravel: pbr('gravel', [2, 2], { mat: { roughness: 1 } }),
+  asphalt: pbr('asphalt', [3, 3], { mat: { roughness: 1, roughnessMap: ptex('asphalt_rgh.jpg', false) } }),
   bark: new THREE.MeshStandardMaterial({ map: ptex('bark_col.jpg'), normalMap: ptex('bark_nrm.jpg', false), roughness: 0.95 }),
   trim: mat(0xf2efe6, { roughness: 0.6 }),
   darkTrim: mat(0x2e2a26, { roughness: 0.6 }),
-  stone: pbr('concrete', [1.2, 1.2], { mat: { color: 0x8c857c } }),
-  wood: pbr('planks', [2.4, 2.4], { mat: { color: 0xc9a27a, roughness: 0.45 } }),
-  darkWood: pbr('planks', [2.4, 2.4], { mat: { color: 0x6b4a33, roughness: 0.45 } }),
+  stone: pbr('concrete', [1.6, 1.6], { mat: { color: 0x9c958c } }),
+  wood: pbr('oak', [1.2, 1.2], { mat: { color: 0xf0e2d0, roughness: 0.45 } }),
+  darkWood: pbr('oak', [1.2, 1.2], { mat: { color: 0x8a6448, roughness: 0.45 } }),
   counter: mat(0x3d3b38, { roughness: 0.25 }),
   white: mat(0xf4f2ee, { roughness: 0.35 }),
   steel: mat(0xc9ccd0, { metalness: 0.85, roughness: 0.3 }),
@@ -431,6 +454,26 @@ function placeModel(place, name, x, y, z, ry = 0, s = 1, tweak) {
   });
   return holder;
 }
+// Many copies of a model (ground cover) as one instanced mesh per mesh in the model.
+function scatter(name, mats) {
+  if (!mats.length) return;
+  model(name).then((root) => {
+    if (!root) return;
+    root.updateMatrixWorld(true);
+    const m = new THREE.Matrix4();
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      const im = new THREE.InstancedMesh(o.geometry, o.material, mats.length);
+      mats.forEach((w, i) => im.setMatrixAt(i, m.multiplyMatrices(w, o.matrixWorld)));
+      im.castShadow = im.receiveShadow = true;
+      im.computeBoundingSphere();
+      scene.add(im);
+    });
+  });
+}
+function spin(x, y, z, s, ry = R(0, 6.28)) {
+  return new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(s, s, s));
+}
 
 // ---------------------------------------------------------------------------
 // Interactive things: screens, phones, people and floating icons
@@ -655,32 +698,10 @@ function officeChair(color = 0x2c2f36) {
   return group(...parts);
 }
 
-function diningChair(woodMat = M.darkWood) {
-  const parts = [bx(0.44, 0.04, 0.42, woodMat, 0, 0.46, 0), bx(0.44, 0.06, 0.03, woodMat, 0, 0.88, -0.2), bx(0.44, 0.06, 0.03, woodMat, 0, 0.7, -0.2)];
-  for (const sx of [-0.19, 0.19]) for (const sz of [-0.18, 0.18]) parts.push(bx(0.04, sz < 0 ? 0.92 : 0.46, 0.04, woodMat, sx, sz < 0 ? 0.46 : 0.23, sz));
-  return group(...parts);
-}
-
-function wheelchair() {
+// QuadStick mouthpiece on a gooseneck, clamped to Dad's wheelchair in front of his face
+function quadStick() {
   const frame = mat(0x30343b, { metalness: 0.7, roughness: 0.3 });
-  const parts = [bx(0.46, 0.07, 0.44, cloth(0x1f2933), 0, 0.48, 0), bx(0.46, 0.5, 0.05, cloth(0x1f2933), 0, 0.78, -0.23)];
-  for (const sx of [-0.29, 0.29]) {
-    const wheel = mesh(new THREE.TorusGeometry(0.3, 0.028, 10, 36), mat(0x1b1b1b, { roughness: 0.7 }), sx, 0.31, -0.08);
-    wheel.rotation.y = Math.PI / 2;
-    const rim = mesh(new THREE.TorusGeometry(0.27, 0.008, 6, 36), frame, sx * 1.08, 0.31, -0.08);
-    rim.rotation.y = Math.PI / 2;
-    for (let k = 0; k < 6; k++) {
-      const sp = bx(0.006, 0.54, 0.006, M.steel, sx, 0.31, -0.08);
-      sp.rotation.x = (k / 6) * Math.PI;
-      parts.push(sp);
-    }
-    const caster = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.03, 14), M.black, sx * 0.8, 0.06, 0.32);
-    caster.rotation.z = Math.PI / 2;
-    parts.push(wheel, rim, caster, bx(0.03, 0.03, 0.5, frame, sx * 0.85, 0.66, 0.0), bx(0.03, 0.35, 0.03, frame, sx * 0.8, 0.3, 0.3));
-  }
-  // QuadStick mouthpiece on a gooseneck in front of the face
-  parts.push(limb(new THREE.Vector3(0.27, 0.6, 0.15), new THREE.Vector3(0.12, 1.05, 0.32), 0.012, frame), bx(0.1, 0.05, 0.05, M.black, 0.04, 1.08, 0.3));
-  return group(...parts);
+  return group(limb(new THREE.Vector3(0.27, 0.6, 0.15), new THREE.Vector3(0.12, 1.05, 0.32), 0.012, frame), bx(0.1, 0.05, 0.05, M.black, 0.04, 1.08, 0.3));
 }
 
 function table(w, d, h = 0.75, top = M.wood, legs = M.darkWood) {
@@ -705,10 +726,6 @@ function bed(w, l, blanket, frameMat = M.darkWood) {
     parts.push(p);
   }
   return group(...parts);
-}
-
-function nightstand(m = M.darkWood) {
-  return group(bx(0.48, 0.55, 0.4, m, 0, 0.275, 0), bx(0.4, 0.02, 0.01, M.steel, 0, 0.42, 0.205));
 }
 
 function dresser(w = 1.3, m = M.wood) {
@@ -816,13 +833,6 @@ function fridge() {
   return group(bx(0.85, 1.85, 0.72, M.steel, 0, 0.925, 0), bx(0.84, 0.006, 0.01, M.black, 0, 1.25, 0.362), bx(0.025, 0.5, 0.04, M.black, 0.36, 1.55, 0.38), bx(0.025, 0.5, 0.04, M.black, 0.36, 0.8, 0.38));
 }
 
-function range() {
-  const parts = [bx(0.76, 0.9, 0.62, M.steel, 0, 0.45, 0), bx(0.76, 0.02, 0.62, M.black, 0, 0.91, 0), bx(0.6, 0.35, 0.01, mat(0x111111, { roughness: 0.1 }), 0, 0.5, 0.311)];
-  for (const sx of [-0.18, 0.18]) for (const sz of [-0.15, 0.13]) parts.push(mesh(new THREE.TorusGeometry(0.08, 0.01, 6, 20), M.black, sx, 0.925, sz));
-  parts.forEach((p) => { if (p.geometry.type === 'TorusGeometry') p.rotation.x = Math.PI / 2; });
-  return group(...parts);
-}
-
 function toilet() {
   const bowl = mesh(new THREE.CylinderGeometry(0.2, 0.15, 0.4, 20), M.white, 0, 0.2, 0.1);
   bowl.scale.z = 1.3;
@@ -912,7 +922,7 @@ function buildGround() {
   const pos = geo.attributes.position, uv = geo.attributes.uv, col = [];
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i);
-    uv.setXY(i, x / 3.5, z / 3.5);
+    uv.setXY(i, x / 2.4, z / 2.4);
     const n = 0.72 + 0.4 * noise2(x * 0.06, z * 0.06) + 0.15 * noise2(x * 0.2 + 7, z * 0.2);
     const f = voidFade(x, z) * n;
     col.push(f, f * 0.98, f * 0.95);
@@ -924,10 +934,10 @@ function buildGround() {
   scene.add(ground);
 
   // Asphalt, gravel shoulders and paint
-  const gravelM = M.gravel.clone(); gravelM.color.set(0xb0a898);
-  ribbon(roadPts, -RW - SHOULDER, -RW + 0.05, 0.012, gravelM, [1.6, 1.6]);
-  ribbon(roadPts, RW - 0.05, RW + SHOULDER, 0.012, gravelM, [1.6, 1.6]);
-  ribbon(roadPts, -RW, RW, 0.02, M.asphalt, [5, 5]);
+  const gravelM = M.gravel.clone(); gravelM.color.set(0xa9a399);
+  ribbon(roadPts, -RW - SHOULDER, -RW + 0.05, 0.012, gravelM, [2, 2]);
+  ribbon(roadPts, RW - 0.05, RW + SHOULDER, 0.012, gravelM, [2, 2]);
+  ribbon(roadPts, -RW, RW, 0.02, M.asphalt, [3, 3]);
   const yellow = new THREE.MeshStandardMaterial({ color: 0xd9a92a, roughness: 0.7 });
   const white = new THREE.MeshStandardMaterial({ color: 0xe8e6df, roughness: 0.7 });
   ribbon(roadPts, -0.18, -0.07, 0.025, yellow, [1, 1]);
@@ -947,7 +957,7 @@ function trunkGeo(H, Rb) {
   const ys = [-0.4, 0, 0.12, 0.3, 0.55, 0.9, 1.4, 2.0, 2.8, 3.8, 5, 6.5, 8.5, 11, 14];
   for (let y = 18; y < H; y += 5) ys.push(y);
   ys.push(H);
-  const uRep = Math.max(1, Math.round((2 * Math.PI * Rb) / 1.2));
+  const uRep = Math.max(1, Math.round((2 * Math.PI * Rb) / 1.9));
   const pos = [], uv = [], idx = [];
   ys.forEach((y, r) => {
     const t = Math.max(0, y) / H;
@@ -959,7 +969,7 @@ function trunkGeo(H, Rb) {
       const fluting = Rb * (0.05 * Math.sin(13 * th + ph2) + 0.03 * Math.sin(7 * th + y * 0.4 + ph3)) * (1 - t);
       const rr = y >= H ? 0.02 : base + flare + butt + fluting;
       pos.push(Math.cos(th) * rr, y, Math.sin(th) * rr);
-      uv.push((j / segs) * uRep, y / 2.4);
+      uv.push((j / segs) * uRep, y / 1.9);
     }
     if (r > 0) {
       const a = (r - 1) * (segs + 1), b = r * (segs + 1);
@@ -1141,6 +1151,26 @@ function plantUndergrowth() {
     if (voidFade(x, z) < 0.1) continue;
     spots.push([x, z]);
   }
+  // The ferns nearest the houses and the road are scanned sword ferns; the rest are cards.
+  const near = ([x, z]) => Math.min(Math.hypot(x - HOUSE.x, z - HOUSE.z) * 0.8, Math.hypot(x - HOUSE2.x, z - HOUSE2.z), Math.abs(z - roadZ(x)) * 1.6);
+  spots.sort((a, b) => near(a) - near(b));
+  const nReal = LOW ? 120 : 340;
+  scatter('fern_02', spots.slice(0, nReal).map(([x, z]) => spin(x, 0, z, R(2.6, 3.6))));
+  spots.splice(0, nReal);
+  // Redwood sorrel carpets around the closer trunks
+  const sorrel = [];
+  for (const t of trees) {
+    if (sorrel.length >= (LOW ? 160 : 420)) break;
+    if (Math.hypot(t.x - HOUSE.x, t.z - HOUSE.z) > 48 && Math.abs(t.z - roadZ(t.x)) > 16) continue;
+    const r0 = TREE_KINDS[t.kind].Rb * t.s * 1.7;
+    for (let k = 0; k < 6; k++) {
+      const a = R(0, 6.28), d = r0 + R(0.2, 3);
+      const x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
+      if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.5) continue;
+      sorrel.push(spin(x, 0, z, R(2.2, 3.2)));
+    }
+  }
+  scatter('shrub_sorrel_01', sorrel);
   const im = new THREE.InstancedMesh(fernGeo(), fm, spots.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3();
   spots.forEach(([x, z], i) => {
@@ -1227,24 +1257,8 @@ function lightShafts() {
 // Street furniture
 
 function hydrant(x, z) {
-  const p = new Place(x, z);
-  const red = mat(0xb5241f, { roughness: 0.45, metalness: 0.2 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.6, 20), red);
-  body.position.y = 0.3;
-  const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.05, 20), red);
-  ring.position.y = 0.06;
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.14, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), red);
-  cap.position.y = 0.6;
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.08, 6), mat(0xb8b8b0, { metalness: 0.6, roughness: 0.4 }));
-  top.position.y = 0.76;
-  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.42, 12), red);
-  nozzle.rotation.z = Math.PI / 2;
-  nozzle.position.y = 0.42;
-  const front = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 12), red);
-  front.rotation.x = Math.PI / 2;
-  front.position.set(0, 0.36, 0.14);
-  p.group.add(body, ring, cap, top, nozzle, front);
-  p.group.traverse((o) => (o.castShadow = true));
+  const p = new Place(x, z, 0.4);
+  placeModel(p, 'fire_hydrant', 0, 0, 0, 0, 1.05);
   p.collider(0, 0, 0.18, 0.18, 0, 0.8);
 }
 
@@ -1502,6 +1516,7 @@ function familyHouse(x, z, rot) {
   const swing = group(bx(1.5, 0.06, 0.5, M.wood, 0, 0.48, 0), bx(1.5, 0.45, 0.05, M.wood, 0, 0.75, -0.25));
   for (const dx of [-0.72, 0.72]) swing.add(bx(0.02, 1.85, 0.02, M.steel, dx, 1.42, 0));
   h.add(swing, swX, FL, swZ);
+  placeModel(h, 'throw_pillows_01', swX + 0.35, FL + 0.51, swZ - 0.08, 0, 0.75);
   h.collider(swX, swZ, 0.8, 0.35, FL, FL + 1.4);
   const grandpa = person({ pose: 'sit', hands: 'phone', shirt: 0x5b2a2a, pants: 0x57534e, skin: SKIN[1], hair: 0xe5e7eb, seatH: 0.48, build: 1.08 });
   h.add(grandpa, swX - 0.3, FL, swZ - 0.05);
@@ -1511,7 +1526,7 @@ function familyHouse(x, z, rot) {
   addIcon('family-card-table', gpx, 3.7, gpz);
   plant(h, PX0 + 0.6, FL, PZ1 - 0.6, 1.0);
   placeModel(h, 'SheenChair', -6, FL, Z1 + 1.2, 0.3, 1.2);
-  placeModel(h, 'SheenChair', -4.8, FL, Z1 + 1.3, -0.3, 1.2);
+  placeModel(h, 'Rockingchair_01', -4.7, FL, Z1 + 1.3, -0.3, 1.05);
 
   // ---- Living room: Mom on the sofa, playing Roadway Rivals with her son ----
   h.add(fireplace(), X0 + 0.35, FL, 3.0, Math.PI / 2);
@@ -1524,7 +1539,8 @@ function familyHouse(x, z, rot) {
   h.add(mom, -2.75, FL, 3.3, -Math.PI / 2);
   tag(mom, 'roadway-rivals', 'roadway-phone.jpg');
   tag(givePhone(mom, 'roadway-phone.jpg'), 'roadway-rivals', 'roadway-phone.jpg');
-  h.add(table(1.1, 0.6, 0.42, M.darkWood, M.darkWood), -4.4, FL, 3.0, Math.PI / 2);
+  placeModel(h, 'CoffeeTable_01', -4.4, FL, 3.0, Math.PI / 2, 0.78);
+  placeModel(h, 'ceiling_fan', -3.4, FL + LEVEL - 0.05, 3.0, 0, 1.0);
   h.collider(-4.4, 3.0, 0.3, 0.55, FL, FL + 0.45);
   placeModel(h, 'ChairDamaskPurplegold', -5.6, FL, 5.1, 2.6, 1.2);
   h.collider(-5.6, 5.1, 0.45, 0.45, FL, FL + 0.9);
@@ -1538,36 +1554,37 @@ function familyHouse(x, z, rot) {
   h.collider(-5.2, Z0 + 0.42, 2.6, 0.32, FL, FL + 0.9);
   h.add(upperCabinets(1.6), -6.9, FL + 1.85, Z0 + 0.27);
   h.add(upperCabinets(1.2), -3.0, FL + 1.85, Z0 + 0.27);
-  h.add(range(), -1.9 + 0.0, FL, Z0 + 0.42);
+  placeModel(h, 'electric_stove', -1.9, FL, Z0 + 0.36, 0, 1.25);
+  placeModel(h, 'potted_plant_04', -6.6, FL + 0.9, Z0 + 0.45, 0.6, 1.2);
+  placeModel(h, 'wall_clock', X0 + 0.11, FL + 2.05, Z0 + 1.2, Math.PI / 2, 1.0);
   h.box(0.8, 0.5, 0.5, -1.9, FL + 2.0, Z0 + 0.35, M.steel);
   h.add(fridge(), X0 + 0.5, FL, -1.0, Math.PI / 2);
   h.collider(X0 + 0.5, -1.0, 0.38, 0.45, FL, FL + 1.9);
-  const tbl = table(1.6, 0.95, 0.76, M.wood, M.darkWood);
-  h.add(tbl, -4.3, FL, -2.7);
+  placeModel(h, 'dining_table', -4.3, FL, -2.7, 0, 1, (o) => o.scale.set(0.72, 0.865, 0.8));
   h.collider(-4.3, -2.7, 0.8, 0.48, FL, FL + 0.8);
   const lap = laptop('fct-desktop.jpg');
   h.add(lap, -4.3, FL + 0.76, -2.85, 0);
   tag(lap, 'family-card-table', 'fct-desktop.jpg');
-  h.add(diningChair(), -4.3, FL, -1.8, Math.PI);
+  placeModel(h, 'dining_chair_02', -4.3, FL, -1.75, Math.PI, 1.05);
   const grandma = person({ pose: 'sit', hands: 'desk', shirt: 0xb83280, pants: 0x4b5563, skin: SKIN[0], hair: 0xd1d5db, seatH: 0.48, handReach: 0.42, handY: 0.8 });
   h.add(grandma, -4.3, FL, -1.8, Math.PI);
   tag(grandma, 'family-card-table', 'fct-desktop.jpg');
-  for (const [cx2, cz2, r2] of [[-5.3, -2.7, Math.PI / 2], [-3.3, -2.7, -Math.PI / 2], [-4.3, -3.6, 0]]) h.add(diningChair(), cx2, FL, cz2, r2);
+  for (const [cx2, cz2, r2] of [[-5.35, -2.7, Math.PI / 2], [-3.25, -2.7, -Math.PI / 2], [-4.3, -3.65, 0]]) placeModel(h, 'dining_chair_02', cx2, FL, cz2, r2, 1.05);
   const vaseB = mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.18, 16), mat(0x5a7f8f, { roughness: 0.2 }), 0, 0.09, 0);
   h.add(group(vaseB), -3.8, FL + 0.76, -2.55);
   const [gx, gz] = h.world(-4.3, -1.8);
   addIcon('family-card-table', gx, FL + 2.0, gz);
 
   // ---- Dad's den: wheelchair, 40" monitor with RubeCube and BetterTalk ----
-  h.add(table(1.8, 0.8, 0.74, M.wood, M.black), X1 - 0.5, FL, 2.5, Math.PI / 2);
+  placeModel(h, 'metal_office_desk', X1 - 0.5, FL, 2.5, -Math.PI / 2, 0.93);
   h.collider(X1 - 0.5, 2.5, 0.4, 0.9, FL, FL + 0.8);
   const big = monitor(0.885, 0.498, 'screen-rubecube-bettertalk.jpg', 0.16);
   h.add(big, X1 - 0.38, FL + 0.74, 2.5, -Math.PI / 2);
   // Clicking the corner of this screen opens BetterTalk; the rest is RubeCube.
   tag(big, 'rubecube', 'rubecube-desktop.jpg');
   big.userData.screen.userData.split = { project: 'bettertalk', shot: 'bettertalk-main.png', u0: 0.69, v1: 0.37 };
-  const wc = wheelchair();
-  h.add(wc, X1 - 1.65, FL, 2.5, Math.PI / 2);
+  placeModel(h, 'wheelchair_01', X1 - 1.65, FL, 2.5, Math.PI / 2, 1.0);
+  h.add(quadStick(), X1 - 1.65, FL, 2.5, Math.PI / 2);
   const dad = person({ pose: 'sit', hands: 'lap', shirt: 0x34568b, pants: 0x374151, skin: SKIN[4], hair: 0x4a3221, seatH: 0.5, build: 1.06 });
   h.add(dad, X1 - 1.65, FL, 2.5, Math.PI / 2);
   tag(dad, 'bettertalk', 'bettertalk-main.png');
@@ -1585,7 +1602,7 @@ function familyHouse(x, z, rot) {
   // ---- Grandparents' room ----
   h.add(bed(1.6, 2.05, 0x8a6f9e), 5.2, FL, Z0 + 1.15);
   h.collider(5.2, Z0 + 1.15, 0.85, 1.08, FL, FL + 0.7);
-  for (const nx of [4.0, 6.4]) { h.add(nightstand(), nx, FL, Z0 + 0.3); placeModel(h, 'IridescenceLamp', nx, FL + 0.55, Z0 + 0.3, 0, 0.9); }
+  for (const nx of [4.0, 6.4]) { placeModel(h, 'ClassicNightstand_01', nx, FL, Z0 + 0.3, 0, 1.0); placeModel(h, 'IridescenceLamp', nx, FL + 0.7, Z0 + 0.3, 0, 0.9); }
   h.add(dresser(1.2), X1 - 0.35, FL, -1.2, -Math.PI / 2);
   placeModel(h, 'SheenChair', 3.3, FL, -0.8, 2.4, 1.2);
   h.add(rug(1.8, 1.2, ['#b9a07a', '#6b4f3a', '#efe3c8']), 5.2, FL, -2.0);
@@ -1597,7 +1614,8 @@ function familyHouse(x, z, rot) {
   h.add(table(0.9, 0.35, 0.8, M.darkWood, M.darkWood), -0.7, FL, 4.8, Math.PI / 2);
 
   // ---- Upstairs: the son's room ----
-  h.add(table(2.0, 0.75), -4.9, UP, Z0 + 0.5);
+  placeModel(h, 'metal_office_desk', -4.9, UP, Z0 + 0.55, 0, 0.95);
+  placeModel(h, 'gamepad', -4.35, UP + 0.75, Z0 + 0.8, 0.4, 1.0);
   h.collider(-4.9, Z0 + 0.5, 1.0, 0.38, UP, UP + 0.8);
   const m1 = monitor(0.6, 0.34, 'roadway-desktop.jpg');
   h.add(m1, -5.35, UP + 0.75, Z0 + 0.4);
@@ -1623,6 +1641,7 @@ function familyHouse(x, z, rot) {
   h.collider(5.5, Z0 + 0.5, 0.8, 0.38, UP, UP + 0.8);
   const m3 = monitor(0.6, 0.34, 'seraph-gameplay.jpg');
   h.add(m3, 5.5, UP + 0.75, Z0 + 0.4);
+  placeModel(h, 'desk_lamp_arm_01', 6.1, UP + 0.75, Z0 + 0.35, -0.5, 0.8);
   tag(m3, 'seraph', 'seraph-gameplay.jpg');
   h.add(officeChair(0x6b46c1), 5.5, UP, Z0 + 1.3, Math.PI);
   const daughter = person({ s: 0.78, pose: 'sit', hands: 'desk', shirt: 0x9333ea, pants: 0x27272a, skin: SKIN[4], hair: 0x3b2314, seatH: 0.5, handReach: 0.45, handY: 0.8, longHair: true });
@@ -1639,7 +1658,7 @@ function familyHouse(x, z, rot) {
   // ---- Upstairs: Mom and Dad's room ----
   h.add(bed(1.8, 2.1, 0x9c8b6e), X0 + 1.15, UP, 3.0, Math.PI / 2);
   h.collider(X0 + 1.15, 3.0, 1.08, 0.95, UP, UP + 0.7);
-  for (const nz of [1.6, 4.4]) { h.add(nightstand(), X0 + 0.3, UP, nz, Math.PI / 2); placeModel(h, 'IridescenceLamp', X0 + 0.3, UP + 0.55, nz, 0, 0.9); }
+  for (const nz of [1.6, 4.4]) { placeModel(h, 'ClassicNightstand_01', X0 + 0.3, UP, nz, Math.PI / 2, 1.0); placeModel(h, 'IridescenceLamp', X0 + 0.3, UP + 0.7, nz, 0, 0.9); }
   h.add(dresser(1.4, M.darkWood), -3.0, UP, 0.3, 0);
   placeModel(h, 'ChairDamaskPurplegold', -2.0, UP, 5.0, -2.4, 1.2);
   h.add(rug(2.4, 1.8, ['#d9cdb4', '#7a5c44', '#f2ead8']), -4.6, UP, 3.0);
@@ -1747,13 +1766,13 @@ function lawn(cx, cz, rx, rz) {
 lawn(HOUSE.x + 1, HOUSE.z + 13, 15, 7);
 lawn(HOUSE.x - 2, HOUSE.z - 9, 11, 5);
 lawn(HOUSE2.x, HOUSE2.z - 9, 10, 4.5);
-const gravelPath = M.gravel.clone(); gravelPath.color.set(0xc4b9a6);
-ribbon(frontWalk, -0.75, 0.75, 0.014, M.concrete, [2, 2]);
-ribbon(drive, -1.7, 1.7, 0.013, gravelPath, [1.6, 1.6]);
-ribbon(drive2, -1.5, 1.5, 0.013, gravelPath, [1.6, 1.6]);
-ribbon(walk2, -0.65, 0.65, 0.014, M.concrete, [2, 2]);
+const gravelPath = M.gravel.clone(); gravelPath.color.set(0xc2b8a8);
+ribbon(frontWalk, -0.75, 0.75, 0.014, M.concrete, [2.5, 2.5]);
+ribbon(drive, -1.7, 1.7, 0.013, gravelPath, [2, 2]);
+ribbon(drive2, -1.5, 1.5, 0.013, gravelPath, [2, 2]);
+ribbon(walk2, -0.65, 0.65, 0.014, M.concrete, [2.5, 2.5]);
 // Parking pad by Dad's ramp
-ribbon(polyline([[DRIVE_X - 1.5, -26], [DRIVE_X - 1.5, -34]]), -2.8, 2.8, 0.0135, gravelPath, [1.6, 1.6]);
+ribbon(polyline([[DRIVE_X - 1.5, -26], [DRIVE_X - 1.5, -34]]), -2.8, 2.8, 0.0135, gravelPath, [2, 2]);
 
 const LOGS = [[-20, -12, 0.4, 16, 0.9], [36, -20, -1.1, 22, 1.2], [-34, 22, 2.2, 14, 0.8], [8, 22, 0.9, 12, 0.7]];
 for (const [lx, lz, lr, len, r] of LOGS) {
@@ -1764,6 +1783,14 @@ plantForest();
 plantUndergrowth();
 for (const l of LOGS) fallenLog(...l);
 for (const [sx, sz, sr] of [[-14, -22, 1.6], [26, -14, 2.0], [-28, 8, 1.4], [16, 14, 1.2], [-46, -30, 2.2]]) if (clearOf(sx, sz, sr)) stump(sx, sz, sr);
+// Mossy boulders and an old stump or two
+for (let i = 0, n = 0; i < 400 && n < 9; i++) {
+  const x = R(-45, 50), z = R(-50, 40);
+  if (!clearOf(x, z, 2.5)) continue;
+  n++;
+  const p = new Place(x, z, R(0, 6.28));
+  if (n % 3 === 0) { placeModel(p, 'tree_stump_01', 0, 0.1, 0, 0, R(1.3, 1.8)); p.collider(0, 0, 0.9, 0.9, 0, 0.9); } else placeModel(p, 'rock_moss_set_01', 0, 0, 0, 0, R(0.5, 0.8));
+}
 lightShafts();
 
 const family = familyHouse(HOUSE.x, HOUSE.z, 0);
