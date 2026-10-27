@@ -94,7 +94,7 @@ export const PROJECTS = [
     aka: 'Freedom Road',  // working title in the 1000miles repo
     tagline: 'Race a rival coast to coast in a road-trip card game.',
     status: { kind: 'dev', label: 'In development' },
-    platforms: ['Phone', 'Desktop browser'],
+    platforms: ['Phone', 'PC', 'Web browser'],
     tags: ['Game', 'Card game', 'React Native / Expo'],
     accent: '#d62839',
     icon: '🚗',
@@ -102,7 +102,7 @@ export const PROJECTS = [
     description: [
       'A coast-to-coast American road trip in a card game. Race a rival from Boston Harbor to the Golden Gate: play mileage cards to cover 1000 miles, ' +
         'throw Fender Benders, Blowouts and Speed Traps at your rival, and fix your own with Tow Trucks, Spare Tires and Green Lights.',
-      'Built with Expo, so it runs on phones and in a desktop browser.',
+      'It runs on phones, as a PC app, and in a web browser on any computer.',
     ],
     highlights: [
       'Original road-trip theme and card art',
