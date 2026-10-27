@@ -1,0 +1,81 @@
+<!doctype html>
+<!-- Turns Quaternius "Ultimate Modular Men" (Humans_Master.fbx, CC0) into one .glb per person in the world.
+     Run it with tools/people_fbx.js, which serves nothing itself: start any static server at the repo root,
+     then: node tools/people_fbx.js "http://localhost:8000/tools/people_fbx.html?fbx=/path/under/server/Humans_Master.fbx" out_dir
+     and pack the results with tools/people.mjs. -->
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import * as SU from 'three/addons/utils/SkeletonUtils.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+const src = await new FBXLoader().loadAsync(new URLSearchParams(location.search).get('fbx'));
+const idle = src.animations.find(a => a.name.endsWith('|Idle_Neutral')).clone(); idle.name = 'Idle_Neutral'; idle.tracks = idle.tracks.filter(t => !t.name.startsWith('CharacterArmature.') && !t.name.endsWith('.scale'));
+// Mix and match parts: they all share one skeleton. "-Gold" drops that material (the King's crown).
+const combos = {
+  dad: ['Adventurer_Head', 'Casual_Body', 'Casual2_Legs', 'Casual2_Feet'],
+  grandpa: ['King_Head-Gold', 'Casual2_Body', 'Suit_Legs', 'Suit_Feet'],
+  son: ['Beach_Head', 'Casual_Body', 'Casual_Legs', 'Casual_Feet'],
+  bus_punk: ['Punk_Head', 'Punk_Body', 'Punk_Legs', 'Punk_Feet'],
+  bus_worker: ['Worker_Head', 'Worker_Body', 'Worker_Legs', 'Worker_Feet'],
+  bus_farmer: ['Farmer_Head', 'Farmer_Body', 'Farmer_Pants', 'Farmer_Feet'],
+};
+const stdCache = new Map();
+const toStd = (m) => { if (!stdCache.has(m)) { const s = new THREE.MeshStandardMaterial({ name: m.name, color: m.color.clone().convertLinearToSRGB(), roughness: /Metal|Gold|Visor/.test(m.name) ? 0.35 : 0.85, metalness: /Metal|Gold/.test(m.name) ? 0.7 : 0 }); stdCache.set(m, s); } return stdCache.get(m); };
+src.traverse(o => { if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(toStd) : toStd(o.material); });
+window.out = {};
+for (const [n, parts] of Object.entries(combos)) {
+  const c = SU.clone(src);
+  const keep = Object.fromEntries(parts.map(p => p.split('-')));
+  const drop = []; c.traverse(o => { if (o.isMesh && !(o.name in keep)) drop.push(o); });
+  c.traverse(o => { if (o.isMesh && keep[o.name]) { const ms = [].concat(o.material); o.geometry = o.geometry.clone(); o.geometry.groups = o.geometry.groups.filter(g => ms[g.materialIndex].name !== keep[o.name]); } });
+  drop.forEach(o => o.removeFromParent());
+  // Bake each mesh's current skinned shape into plain meters, drop the FBX cm scales, and rebind.
+  c.updateMatrixWorld(true);
+  const arm = c.getObjectByName('CharacterArmature');
+  const meshes = []; c.traverse(o => { if (o.isSkinnedMesh) meshes.push(o); });
+  const v = new THREE.Vector3();
+  for (const m of meshes) {
+    const pos = m.geometry.attributes.position;
+    const g = m.geometry.clone();
+    for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); m.applyBoneTransform(i, v); v.applyMatrix4(m.matrixWorld).multiplyScalar(0.01); g.attributes.position.setXYZ(i, v.x, v.y, v.z); }
+    g.deleteAttribute('normal'); g.deleteAttribute('color'); g.deleteAttribute('uv'); g.deleteAttribute('uv1'); g.computeVertexNormals();
+    // FBX splits materials into many small runs; sort triangles so each material is one draw.
+    const tris = [];
+    for (const gr of (g.groups.length ? g.groups : [{ start: 0, count: pos.count, materialIndex: 0 }])) for (let t = gr.start; t < gr.start + gr.count; t += 3) tris.push([gr.materialIndex, t]);
+    tris.sort((a, b) => a[0] - b[0]);
+    const sorted = new THREE.BufferGeometry();
+    for (const [k, attr] of Object.entries(g.attributes)) {
+      const arr = new attr.array.constructor(tris.length * 3 * attr.itemSize);
+      tris.forEach(([, t], i) => arr.set(attr.array.subarray(t * attr.itemSize, (t + 3) * attr.itemSize), i * 3 * attr.itemSize));
+      sorted.setAttribute(k, new THREE.BufferAttribute(arr, attr.itemSize, attr.normalized));
+    }
+    let start = 0;
+    for (let i = 0; i <= tris.length; i++) if (i === tris.length || (i > 0 && tris[i][0] !== tris[i - 1][0])) { sorted.addGroup(start * 3, (i - start) * 3, tris[i - 1][0]); start = i; }
+    m.geometry = mergeVertices(sorted, 1e-5);
+  }
+  arm.scale.setScalar(1); c.updateMatrixWorld(true);
+  const skel = meshes[0].skeleton;
+  skel.calculateInverses();
+  for (const m of meshes) { m.removeFromParent(); m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.setScalar(1); c.add(m); m.updateMatrixWorld(true); m.bind(skel, new THREE.Matrix4()); }
+  // The FBX carries a copy of the skeleton per mesh; keep only the one in use.
+  const used = new Set(skel.bones);
+  // Each bone also sits at the bottom of a stack of identically named, identity copies.
+  // Hang every used bone straight off the used bone of its real parent, with the top copy's transform.
+  const byName = Object.fromEntries([...used].map(o => [o.name, o]));
+  for (const bone of used) {
+    let top = bone; while (top.parent && top.parent.name === bone.name) top = top.parent;
+    const parent = top.parent.isBone ? byName[top.parent.name] : arm;
+    bone.position.copy(top.position); bone.quaternion.copy(top.quaternion); bone.scale.copy(top.scale);
+    parent.add(bone);
+  }
+  const extra = []; c.traverse(o => { if (o.isBone && !used.has(o)) extra.push(o); });
+  extra.forEach(o => o.removeFromParent());
+  const glb = await new GLTFExporter().parseAsync(c, { binary: true, animations: [idle] });
+  let s = ''; const u = new Uint8Array(glb); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  window.out[n] = btoa(s);
+  console.log(n, u.length);
+}
+window.done = true;
+</script>

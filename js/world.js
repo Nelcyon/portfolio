@@ -10,11 +10,14 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { PROJECTS, projectById } from './projects.js';
+import { posePerson } from './people.js';
 
 const SHOTS = 'assets/shots/';
 const TEX = 'assets/tex/';
 const MODELS = 'assets/models/';
+const PEOPLE = 'assets/people/';
 const EYE = 1.65;
 const RADIUS = 0.3; // visitor's body radius for collisions
 const STEP = 0.45; // highest step the visitor can walk up
@@ -579,99 +582,59 @@ function limb(a, b, r, material) {
   return m;
 }
 
-const SKIN = [0xf1c7a5, 0xd9a07a, 0xa86b45, 0x6e4329, 0xe8b894];
 function cloth(color) { return mat(color, { roughness: 0.95 }); }
-// A person, facing +Z, origin on the floor under them.
-// pose: 'stand' | 'sit'. hands: 'phone' | 'desk' | 'side' | 'lap'. s scales kids.
-function person({ s = 1, pose = 'stand', hands = 'side', shirt = 0x3b82f6, pants = 0x2d3340, skin = SKIN[0], hair = 0x2b1d14, seatH = 0.48, handReach = 0.42, handY, longHair = false, build = 1 } = {}) {
-  const g = new THREE.Group();
-  const V = (x, y, z) => new THREE.Vector3(x * s, y * s, z * s);
-  const mSkin = mat(skin, { roughness: 0.6 }), mShirt = cloth(shirt), mPants = cloth(pants), mHair = mat(hair, { roughness: 0.75 }), mShoe = mat(0x1d1d1f, { roughness: 0.5 });
-  let hipY, shoulderY, headY;
-  if (pose === 'stand') {
-    hipY = 0.92; shoulderY = 1.42; headY = 1.6;
-    for (const sx of [-0.1, 0.1]) {
-      g.add(limb(V(sx, hipY, 0), V(sx * 0.9, 0.48, 0.01), 0.068 * s, mPants));
-      g.add(limb(V(sx * 0.9, 0.48, 0.01), V(sx * 0.9, 0.1, 0.0), 0.055 * s, mPants));
-      const shoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.048 * s, 0.16 * s, 4, 8), mShoe);
-      shoe.rotation.x = Math.PI / 2;
-      shoe.position.copy(V(sx * 0.9, 0.05, 0.05));
-      g.add(shoe);
-    }
-  } else {
-    const hy = seatH / s + 0.06;
-    hipY = hy; shoulderY = hy + 0.5; headY = hy + 0.68;
-    for (const sx of [-0.1, 0.1]) {
-      g.add(limb(V(sx, hy, 0.02), V(sx, hy, 0.42), 0.072 * s, mPants));
-      g.add(limb(V(sx, hy, 0.44), V(sx, 0.1, 0.5), 0.056 * s, mPants));
-      const shoe = new THREE.Mesh(new THREE.CapsuleGeometry(0.048 * s, 0.15 * s, 4, 8), mShoe);
-      shoe.rotation.x = Math.PI / 2;
-      shoe.position.copy(V(sx, 0.05, 0.56));
-      g.add(shoe);
-    }
-  }
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16 * s * build, (shoulderY - hipY - 0.2) * s, 6, 14), mShirt);
-  torso.scale.z = 0.68;
-  torso.position.copy(V(0, (hipY + shoulderY) / 2, 0));
-  torso.castShadow = true;
-  const hips = new THREE.Mesh(new THREE.SphereGeometry(0.15 * s * build, 14, 10), mPants);
-  hips.scale.set(1.05, 0.6, 0.75);
-  hips.position.copy(V(0, hipY + 0.02, 0));
-  const neck = limb(V(0, shoulderY - 0.02, 0), V(0, headY - 0.08, 0.005), 0.045 * s, mSkin);
-  g.add(torso, hips, neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.105 * s, 20, 16), mSkin);
-  head.scale.set(0.92, 1.12, 1);
-  head.position.copy(V(0, headY, 0.01));
-  head.castShadow = true;
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.016 * s, 0.04 * s, 8), mSkin);
-  nose.rotation.x = Math.PI / 2; nose.position.copy(V(0, headY - 0.01, 0.115));
-  const ears = [-1, 1].map((sx) => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.022 * s, 8, 6), mSkin); e.scale.set(0.5, 1, 0.8); e.position.copy(V(sx * 0.097, headY, 0.0)); return e; });
-  const hairM = new THREE.Mesh(new THREE.SphereGeometry(0.114 * s, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.56), mHair);
-  hairM.scale.set(0.95, 1.12, 1.04);
-  hairM.position.copy(V(0, headY + 0.012, -0.008));
-  hairM.rotation.x = -0.3;
-  g.add(head, nose, ...ears, hairM);
-  if (longHair) {
-    const back = new THREE.Mesh(new THREE.CapsuleGeometry(0.085 * s, 0.18 * s, 4, 10), mHair);
-    back.scale.z = 0.55;
-    back.position.copy(V(0, headY - 0.12, -0.07));
-    g.add(back);
-  }
 
-  // Arms: shoulder → elbow → hand
-  const hand = {
-    phone: (sx) => V(sx * 0.35, shoulderY - 0.3, 0.3),
-    desk: (sx) => V(sx * 0.9, handY != null ? handY / s : shoulderY - 0.33, handReach / s),
-    side: (sx) => V(sx * 1.05, shoulderY - 0.62, 0.02),
-    lap: (sx) => V(sx * 0.5, hipY + 0.06, 0.3),
-  }[hands];
-  for (const sx of [-0.2, 0.2]) {
-    const sh = V(sx * 1.05 * build, shoulderY - 0.04, 0);
-    const hd = hand(sx);
-    const el = sh.clone().lerp(hd, 0.5);
-    el.y -= 0.08 * s;
-    el.x += Math.sign(sx) * 0.05 * s;
-    if (hands === 'side') el.copy(sh).lerp(hd, 0.5);
-    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.04 * s, 10, 8), mSkin);
-    palm.scale.set(0.8, 1, 0.55);
-    palm.position.copy(hd);
-    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.06 * s, 10, 8), mShirt);
-    shoulder.position.copy(sh);
-    g.add(limb(sh, el, 0.052 * s, mShirt), limb(el, hd, 0.042 * s, mSkin), palm, shoulder);
+// People: Quaternius characters (CC0) packed by tools/people.mjs, posed in js/people.js.
+const characterCache = new Map();
+function character(name) {
+  if (!characterCache.has(name)) {
+    const load = (url, ok, fail) => gltf.load(url, ok, undefined, fail);
+    characterCache.set(name, new Promise((resolve) => {
+      load(PEOPLE + name + '.glb', resolve, () => load(PEOPLE + name + '.gltf.json', resolve, () => resolve(null)));
+    }));
   }
-  g.userData.head = V(0, headY, 0.01);
-  g.userData.hands = hand(0);
-  return g;
+  return characterCache.get(name);
 }
 
-// Put a phone in a person's hands, screen tilted up toward their face.
-function givePhone(p, file) {
-  const ph = phone(file);
-  const at = p.userData.hands.clone();
-  ph.position.copy(at);
-  ph.lookAt(p.userData.head.clone().add(new THREE.Vector3(0, 0.25, 0.25)));
-  p.add(ph);
-  return ph;
+// Pose presets. sit is the seat height; hands are measured from the middle of the body outward.
+const POSES = {
+  phone: (sit) => ({ sit, lean: 0.15, head: 0.45, hands: [[0.07, sit + 0.46, 0.3], [0.07, sit + 0.46, 0.3]], elbows: [0.3, -0.3, -0.1], grip: 0.6 }),
+  desk: (sit, y, z) => ({ sit, lean: 0.25, head: 0.12, hands: [[0.14, y, z], [0.14, y, z]] }),
+  lap: (sit) => ({ sit, head: 0.05, hands: [[0.12, sit + 0.12, 0.3], [0.12, sit + 0.12, 0.3]], grip: 0.2 }),
+  standPhone: { head: 0.4, hands: [[0.07, 1.18, 0.3], [0.07, 1.18, 0.3]], elbows: [0.3, -0.3, -0.1], grip: 0.6 },
+};
+
+// A person, facing +Z, origin on the floor under them. Fills in when the model loads.
+// colors recolors materials by name ('Hair' covers every hair material); phone puts that
+// screenshot on a phone in their hands; project/shot make them clickable.
+function person(name, pose = {}, { s = 1, colors = {}, phone: phoneShot, project, shot } = {}) {
+  const holder = new THREE.Group();
+  holder.name = 'person:' + name;
+  holder.scale.setScalar(s);
+  character(name).then((g) => {
+    if (!g) return;
+    const o = cloneSkinned(g.scene);
+    o.traverse((m) => {
+      if (!m.isMesh) return;
+      m.castShadow = true;
+      const key = Object.keys(colors).find((k) => m.material.name === k || (k === 'Hair' && m.material.name.startsWith('Hair')));
+      if (key) { m.material = m.material.clone(); m.material.color.set(colors[key]); }
+    });
+    const b = posePerson(o, g.animations[0], { ...pose, scale: s });
+    // o is still at the origin, so bone world positions are in the holder's own space.
+    const at = (bone) => bone.getWorldPosition(new THREE.Vector3());
+    if (phoneShot) {
+      const ph = phone(phoneShot);
+      ph.position.copy(at(b.Index2R).add(at(b.Index2L)).multiplyScalar(0.5));
+      ph.lookAt(at(b.Head).add(new THREE.Vector3(0, 0.3, 0.3)));
+      ph.scale.setScalar(1 / s);
+      holder.add(ph);
+    }
+    holder.add(o);
+    if (project) tag(holder, project, shot);
+    holder.traverse((m) => { if (m.isMesh) pickables.push(m); });
+  });
+  return holder;
 }
 
 // ---------------------------------------------------------------------------
@@ -1319,23 +1282,19 @@ function busStop(x, z) {
 
   const Y = 0.12;
   // People waiting. A: on the bench playing Roadway Rivals against the son up at the house.
-  const a = person({ pose: 'sit', hands: 'phone', shirt: 0x7c3aed, pants: 0x1f2937, skin: SKIN[2], hair: 0x111111, seatH: 0.6 });
-  p.add(a, -1.6, Y - 0.12, -0.98, 0.15);
-  tag(a, 'roadway-rivals', 'roadway-phone.jpg');
-  tag(givePhone(a, 'roadway-phone.jpg'), 'roadway-rivals', 'roadway-phone.jpg');
+  const a = person('bus_punk', POSES.phone(0.6), { colors: { Skin: 0xa86b45 }, phone: 'roadway-phone.jpg', project: 'roadway-rivals', shot: 'roadway-phone.jpg' });
+  p.add(a, -1.6, Y - 0.12, -0.9, 0.15);
   // B: standing, playing Bridge Defender
-  const b = person({ hands: 'phone', shirt: 0xf97316, pants: 0x334155, skin: SKIN[0], hair: 0x8b5a2b, longHair: true });
+  const b = person('bus_suit', POSES.standPhone, { phone: 'bridge-defender-gameplay.jpg', project: 'bridge-defender', shot: 'bridge-defender-gameplay.jpg' });
   p.add(b, 0.9, Y, 0.15, -0.35);
-  tag(b, 'bridge-defender', 'bridge-defender-gameplay.jpg');
-  tag(givePhone(b, 'bridge-defender-gameplay.jpg'), 'bridge-defender', 'bridge-defender-gameplay.jpg');
   p.collider(0.9, 0.15, 0.25, 0.25, 0, 1.8);
   // C: waiting, looking down the road for the bus
-  const cc = person({ shirt: 0x0f766e, pants: 0x3f3f46, skin: SKIN[3], hair: 0x1c1917 });
+  const cc = person('bus_worker', { head: -0.05 }, { colors: { Skin: 0x6e4329 } });
   p.add(cc, 2.3, Y, 0.4, Math.PI / 2 + 0.3);
   p.collider(2.3, 0.4, 0.25, 0.25, 0, 1.8);
   // D: on the bench, hands in lap
-  const d = person({ pose: 'sit', hands: 'lap', shirt: 0xbe123c, pants: 0x44403c, skin: SKIN[1], hair: 0x9ca3af, seatH: 0.6 });
-  p.add(d, -2.6, Y - 0.12, -0.98, -0.1);
+  const d = person('bus_farmer', POSES.lap(0.6));
+  p.add(d, -2.6, Y - 0.12, -0.9, -0.1);
 
   const [ix, iz] = p.world(-1.6, -0.8), [jx, jz] = p.world(0.9, 0.2);
   addIcon('roadway-rivals', ix, 3.5, iz);
@@ -1518,10 +1477,8 @@ function familyHouse(x, z, rot) {
   h.add(swing, swX, FL, swZ);
   placeModel(h, 'throw_pillows_01', swX + 0.35, FL + 0.51, swZ - 0.08, 0, 0.75);
   h.collider(swX, swZ, 0.8, 0.35, FL, FL + 1.4);
-  const grandpa = person({ pose: 'sit', hands: 'phone', shirt: 0x5b2a2a, pants: 0x57534e, skin: SKIN[1], hair: 0xe5e7eb, seatH: 0.48, build: 1.08 });
-  h.add(grandpa, swX - 0.3, FL, swZ - 0.05);
-  tag(grandpa, 'family-card-table', 'fct-phone.jpg');
-  tag(givePhone(grandpa, 'fct-phone.jpg'), 'family-card-table', 'fct-phone.jpg');
+  const grandpa = person('grandpa', POSES.phone(0.51), { colors: { LightBrown: 0x5b2a2a }, phone: 'fct-phone.jpg', project: 'family-card-table', shot: 'fct-phone.jpg' });
+  h.add(grandpa, swX - 0.3, FL, swZ + 0.05);
   const [gpx, gpz] = h.world(swX, swZ);
   addIcon('family-card-table', gpx, 3.7, gpz);
   plant(h, PX0 + 0.6, FL, PZ1 - 0.6, 1.0);
@@ -1535,10 +1492,8 @@ function familyHouse(x, z, rot) {
   h.add(rug(2.8, 2.0, ['#7b4b3a', '#d8c7a8', '#3f2a22']), -4.6, FL, 3.0);
   placeModel(h, 'GlamVelvetSofa', -2.6, FL, 3.0, -Math.PI / 2, 1.05);
   h.collider(-2.4, 3.0, 0.45, 1.15, FL, FL + 0.8);
-  const mom = person({ pose: 'sit', hands: 'phone', shirt: 0x2a9d8f, pants: 0x2b3a55, skin: SKIN[4], hair: 0x5a3417, seatH: 0.47, longHair: true });
-  h.add(mom, -2.75, FL, 3.3, -Math.PI / 2);
-  tag(mom, 'roadway-rivals', 'roadway-phone.jpg');
-  tag(givePhone(mom, 'roadway-phone.jpg'), 'roadway-rivals', 'roadway-phone.jpg');
+  const mom = person('mom', POSES.phone(0.47), { colors: { White: 0x2a9d8f, Orange: 0x2b3a55, Hair: 0x5a3417 }, phone: 'roadway-phone.jpg', project: 'roadway-rivals', shot: 'roadway-phone.jpg' });
+  h.add(mom, -2.65, FL, 3.3, -Math.PI / 2);
   placeModel(h, 'CoffeeTable_01', -4.4, FL, 3.0, Math.PI / 2, 0.78);
   placeModel(h, 'ceiling_fan', -3.4, FL + LEVEL - 0.05, 3.0, 0, 1.0);
   h.collider(-4.4, 3.0, 0.3, 0.55, FL, FL + 0.45);
@@ -1563,12 +1518,11 @@ function familyHouse(x, z, rot) {
   placeModel(h, 'dining_table', -4.3, FL, -2.7, 0, 1, (o) => o.scale.set(0.72, 0.865, 0.8));
   h.collider(-4.3, -2.7, 0.8, 0.48, FL, FL + 0.8);
   const lap = laptop('fct-desktop.jpg');
-  h.add(lap, -4.3, FL + 0.76, -2.85, 0);
+  h.add(lap, -4.3, FL + 0.76, -2.42, 0);
   tag(lap, 'family-card-table', 'fct-desktop.jpg');
   placeModel(h, 'dining_chair_02', -4.3, FL, -1.75, Math.PI, 1.05);
-  const grandma = person({ pose: 'sit', hands: 'desk', shirt: 0xb83280, pants: 0x4b5563, skin: SKIN[0], hair: 0xd1d5db, seatH: 0.48, handReach: 0.42, handY: 0.8 });
-  h.add(grandma, -4.3, FL, -1.8, Math.PI);
-  tag(grandma, 'family-card-table', 'fct-desktop.jpg');
+  const grandma = person('grandma', POSES.desk(0.48, 0.8, 0.52), { colors: { Hair: 0xd1d5db }, project: 'family-card-table', shot: 'fct-desktop.jpg' });
+  h.add(grandma, -4.3, FL, -1.75, Math.PI);
   for (const [cx2, cz2, r2] of [[-5.35, -2.7, Math.PI / 2], [-3.25, -2.7, -Math.PI / 2], [-4.3, -3.65, 0]]) placeModel(h, 'dining_chair_02', cx2, FL, cz2, r2, 1.05);
   const vaseB = mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.18, 16), mat(0x5a7f8f, { roughness: 0.2 }), 0, 0.09, 0);
   h.add(group(vaseB), -3.8, FL + 0.76, -2.55);
@@ -1585,9 +1539,9 @@ function familyHouse(x, z, rot) {
   big.userData.screen.userData.split = { project: 'bettertalk', shot: 'bettertalk-main.png', u0: 0.69, v1: 0.37 };
   placeModel(h, 'wheelchair_01', X1 - 1.65, FL, 2.5, Math.PI / 2, 1.0);
   h.add(quadStick(), X1 - 1.65, FL, 2.5, Math.PI / 2);
-  const dad = person({ pose: 'sit', hands: 'lap', shirt: 0x34568b, pants: 0x374151, skin: SKIN[4], hair: 0x4a3221, seatH: 0.5, build: 1.06 });
+  // Dad drives everything with the QuadStick, so his hands rest in his lap.
+  const dad = person('dad', { ...POSES.lap(0.5), head: -0.05 }, { colors: { Purple: 0x34568b }, project: 'bettertalk', shot: 'bettertalk-main.png' });
   h.add(dad, X1 - 1.65, FL, 2.5, Math.PI / 2);
-  tag(dad, 'bettertalk', 'bettertalk-main.png');
   h.collider(X1 - 1.65, 2.5, 0.45, 0.45, FL, FL + 1.4);
   const [btx, btz] = h.world(X1 - 1.3, 1.1), [rcx, rcz] = h.world(X1 - 1.3, 3.9);
   addIcon('bettertalk', btx, FL + 2.4, btz);
@@ -1624,9 +1578,8 @@ function familyHouse(x, z, rot) {
   h.add(m2, -4.3, UP + 0.75, Z0 + 0.4, -0.25);
   tag(m2, 'bridge-defender', 'bridge-defender-gameplay.jpg');
   h.add(officeChair(0xb91c1c), -5.0, UP, Z0 + 1.3, Math.PI);
-  const son = person({ s: 0.8, pose: 'sit', hands: 'desk', shirt: 0x2f855a, pants: 0x1e3a8a, skin: SKIN[4], hair: 0x5a3417, seatH: 0.5, handReach: 0.45, handY: 0.8 });
+  const son = person('son', POSES.desk(0.51, 0.8, 0.45), { s: 0.82, colors: { Purple: 0x2f855a }, project: 'roadway-rivals', shot: 'roadway-desktop.jpg' });
   h.add(son, -5.0, UP, Z0 + 1.3, Math.PI);
-  tag(son, 'roadway-rivals', 'roadway-desktop.jpg');
   h.add(bed(1.0, 2.0, 0x2b6cb0), X0 + 0.6, UP, -2.0);
   h.collider(X0 + 0.6, -2.0, 0.55, 1.03, UP, UP + 0.7);
   h.add(poster('roadway-title-phone.jpg', 0.45, 0.8), -2.6, UP + 1.6, -0.08, Math.PI);
@@ -1644,9 +1597,8 @@ function familyHouse(x, z, rot) {
   placeModel(h, 'desk_lamp_arm_01', 6.1, UP + 0.75, Z0 + 0.35, -0.5, 0.8);
   tag(m3, 'seraph', 'seraph-gameplay.jpg');
   h.add(officeChair(0x6b46c1), 5.5, UP, Z0 + 1.3, Math.PI);
-  const daughter = person({ s: 0.78, pose: 'sit', hands: 'desk', shirt: 0x9333ea, pants: 0x27272a, skin: SKIN[4], hair: 0x3b2314, seatH: 0.5, handReach: 0.45, handY: 0.8, longHair: true });
+  const daughter = person('daughter', POSES.desk(0.51, 0.8, 0.45), { s: 0.9, project: 'seraph', shot: 'seraph-gameplay.jpg' });
   h.add(daughter, 5.5, UP, Z0 + 1.3, Math.PI);
-  tag(daughter, 'seraph', 'seraph-gameplay.jpg');
   h.add(bed(1.0, 2.0, 0xd53f8c), X1 - 0.6, UP, -2.0);
   h.collider(X1 - 0.6, -2.0, 0.55, 1.03, UP, UP + 0.7);
   placeModel(h, 'SpecularSilkPouf', 4.0, UP, -2.3, 0, 1.0);
