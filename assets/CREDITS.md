@@ -6,7 +6,7 @@ Everything in the 3D world is either built in code, generated for this site, or 
 
 ### Khronos glTF sample models
 
-From the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) repository. Compressed for the web with [glTF Transform](https://gltf-transform.dev/) (meshopt geometry, WebP textures, some meshes simplified); otherwise unchanged.
+From the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) repository. Modified for this site with [glTF Transform](https://gltf-transform.dev/) (`tools/slim.mjs`): meshes simplified, textures replaced by their average colors, meshopt compression.
 
 | File | What it is in the world | Author / owner | License |
 | --- | --- | --- | --- |
@@ -20,7 +20,7 @@ From the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sampl
 
 ### Poly Haven models
 
-From [Poly Haven](https://polyhaven.com/models), all [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (no attribution required; credited here anyway). Downloaded as 1K glTF, then compressed with glTF Transform (meshopt, WebP textures at 256 to 512 px, meshes simplified).
+From [Poly Haven](https://polyhaven.com/models), all [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (no attribution required; credited here anyway). Downloaded as 1K glTF, then simplified and flat-colored with glTF Transform (`tools/slim.mjs`).
 
 | File | What it is in the world | Poly Haven asset |
 | --- | --- | --- |
@@ -61,38 +61,16 @@ Characters by [Quaternius](https://quaternius.com/), all [CC0 1.0](https://creat
 | `son.glb` | The son at his desk | Ultimate Modular Men: Beach head, Casual hoodie, legs and shoes |
 | `bus_punk.glb`, `bus_worker.glb`, `bus_farmer.glb` | Riders waiting for the bus | Ultimate Modular Men: "Punk", "Worker", "Farmer" |
 
-The women come from the pack's individual glTF files. The men pack's combined `Humans_Master.fbx` was split into these people by `tools/people_fbx.html`. Everything was then packed by `tools/people.mjs` (idle frame only, meshopt).
+The women come from the pack's individual glTF files. The men pack's combined `Humans_Master.fbx` was split into these people by `tools/people_fbx.html`. Everything was then packed by `tools/people.mjs` (idle frame only, meshopt) and slimmed by `tools/slim.mjs`.
 
-## Lighting and sky (`assets/hdri/`)
+## Leaves and bark (`assets/tex/`)
 
-- "Forest Slope" by Greg Zaal, [Poly Haven](https://polyhaven.com/a/forest_slope), [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
-  - `forest_slope.png`: the 2K HDR averaged down to 512 px and packed as RGBE in a PNG (`tools/hdr2png.py`), used for image-based lighting.
-  - `forest_slope_sky.jpg`: the upper half of Poly Haven's tonemapped JPG, 2048 x 512, used as the sky seen through the canopy.
+- `spray_a.webp` (redwood foliage) and `fern_a.webp` (distant fern cards) are leaf silhouettes generated procedurally for this site (`tools/gentex.py`, then `tools/webtex.py`), released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+- `bark.webp`: [Metasequoia Bark](https://polyhaven.com/a/metasequoia_bark) from Poly Haven, [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), resized to 256 px.
 
-## Textures (`assets/tex/`)
+## Flat colors
 
-Photo-scanned surfaces from [Poly Haven](https://polyhaven.com/textures), all [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). 1K color and OpenGL normal maps (some resized to 512 px), recompressed as JPEG by `tools/polyhaven_tex.py`; carpet color is desaturated so each room can tint it.
-
-| Files | Surface | Poly Haven asset |
-| --- | --- | --- |
-| `bark_*` | Redwood trunks, logs, stumps | [Metasequoia Bark](https://polyhaven.com/a/metasequoia_bark) |
-| `floor_*` | Forest floor | [Mud Forest](https://polyhaven.com/a/mud_forest) |
-| `asphalt_*` | Road | [Asphalt 02](https://polyhaven.com/a/asphalt_02) |
-| `gravel_*` | Shoulders and driveways | [Gravel Floor 02](https://polyhaven.com/a/gravel_floor_02) |
-| `siding_*` | House siding | [Weathered Plank Siding](https://polyhaven.com/a/weathered_plank_siding) |
-| `shingle_*` | Roofs | [Roof Slates 02](https://polyhaven.com/a/roof_slates_02) |
-| `planks_*` | Wood floors | [Wood Floor](https://polyhaven.com/a/wood_floor) |
-| `deck_*` | Porch and ramp | [Wood Floor Deck](https://polyhaven.com/a/wood_floor_deck) |
-| `oak_*` | Furniture wood | [Oak Wood Planks](https://polyhaven.com/a/oak_wood_planks) |
-| `tile_*` | Kitchen and bathroom tile | [Interior Tiles](https://polyhaven.com/a/interior_tiles) |
-| `carpet_*` | Bedroom carpet | [Dirty Carpet](https://polyhaven.com/a/dirty_carpet) |
-| `concrete_*` | Walks, foundations, stone | [Brushed Concrete](https://polyhaven.com/a/brushed_concrete) |
-| `plaster_nrm.jpg` | Painted interior walls | [Painted Plaster Wall](https://polyhaven.com/a/painted_plaster_wall) |
-
-Also:
-
-- `grass_col.jpg`: from the [Babylon.js Assets](https://github.com/BabylonJS/Assets) repository (`textures/grass.jpg`), resized. [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), © Babylon.js contributors.
-- `fern.png` (distant fern cards) and `spray.png` (redwood foliage) were generated procedurally for this site (`tools/gentex.py`) and are released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+The world is drawn in a flat-colored, low-poly style. The surface colors in `js/world.js` (`SURFACE`) are the average colors of Poly Haven CC0 scans the world used to wear (Metasequoia Bark, Mud Forest, Asphalt 02, Gravel Floor 02, Weathered Plank Siding, Roof Slates 02, Wood Floor, Wood Floor Deck, Oak Wood Planks, Interior Tiles, Dirty Carpet, Brushed Concrete) and of the Babylon.js grass texture (CC BY 4.0, © Babylon.js contributors). The models above went through `tools/slim.mjs`, which replaces their textures with average colors, simplifies them and drops their normals; the sky is a gradient built in code.
 
 ## Code
 

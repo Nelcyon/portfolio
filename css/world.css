@@ -39,7 +39,8 @@ body.touch .desktop-only, body:not(.touch) .touch-only { display: none; }
 kbd { display: inline-block; min-width: 24px; text-align: center; padding: 1px 6px; margin-right: 3px; border-radius: 5px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.08); color: var(--ink); font: 600 12px/1.6 'Inter', sans-serif; }
 .go { font: inherit; font-weight: 700; font-size: 16px; padding: 12px 20px; border-radius: 10px; border: 0; background: #ffd34d; color: #1a1500; cursor: pointer; }
 .go:disabled { opacity: 0.5; cursor: wait; }
-.loading { font-size: 13px; margin: 12px 0 0 !important; }
+#load-bar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 50; pointer-events: none; }
+#load-bar i { display: block; height: 100%; width: 0; background: #ffd34d; transition: width 0.3s; }
 
 .panel-card { max-width: min(1400px, 94vw); position: relative; overflow: hidden; display: grid; grid-template-columns: 1.7fr 1fr; }
 .panel-card .shot { background: #000; display: grid; place-items: center; min-height: min(60vh, 640px); max-height: 86vh; }

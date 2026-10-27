@@ -15,11 +15,14 @@ const FILTERS = [
   { id: 'mods', label: 'Mods', test: (p) => p.status.kind === 'mod' },
 ];
 
+// Cards show the 768 px WebP copies of the screenshots (tools/webtex.py makes them).
+const thumb = (src) => src.replace('assets/shots/', 'assets/shots/w/').replace(/\.(jpg|png)$/, '.webp');
+
 function card(p) {
   const phone = p.gallery.find((g) => g.src === p.cover)?.kind === 'phone';
   return `
     <a class="card" href="project.html?id=${encodeURIComponent(p.id)}">
-      <div class="cover${phone ? ' phone' : ''}"><img src="${esc(p.cover)}" alt="" loading="lazy" /></div>
+      <div class="cover${phone ? ' phone' : ''}"><img src="${esc(thumb(p.cover))}" alt="" loading="lazy" /></div>
       <div class="body">
         <span class="badge ${esc(p.status.kind)}">${esc(p.status.label)}</span>
         <h3><span aria-hidden="true">${p.icon}</span>${esc(p.name)}</h3>

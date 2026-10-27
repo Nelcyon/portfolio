@@ -22,15 +22,17 @@ const EYE = 1.65;
 const RADIUS = 0.3; // visitor's body radius for collisions
 const STEP = 0.45; // highest step the visitor can walk up
 const isTouch = matchMedia('(pointer: coarse)').matches;
-const LOW = isTouch || /[?&]low\b/.test(location.search); // lighter shadows for phones
+const LOW = isTouch || /[?&]low\b/.test(location.search); // phones: smaller textures, lighter shadows
 
 // Road: a gentle curve along x
 const RW = 3.6; // asphalt half width
 const SHOULDER = 1.3;
 const roadZ = (x) => 4 * Math.sin((x - 10) / 32);
-const ROAD_X = [-120, 120];
-const BOUNDS = { x0: -52, x1: 52, z0: -55, z1: 47 };
-const WORLD_R = { x: 78, z: 72 }; // the ground fades into the void past this
+const ROAD_X = [-45, 55];
+// A small world: the road, the bus stop, the family's drive and house, ending just behind it.
+const BOUNDS = { x0: -20, x1: 31, z0: -45, z1: 9 };
+const WORLD_C = { x: 6, z: -18 }; // center of the world
+const WORLD_R = { x: 32, z: 31 }; // the ground fades into the void past this
 
 // Deterministic randomness so the forest is the same on every visit
 let seed = 20261027;
@@ -56,10 +58,19 @@ function noise2(x, z) {
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2));
+const MAX_PR = Math.min(window.devicePixelRatio, LOW ? 1.5 : 2);
+renderer.setPixelRatio(MAX_PR);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = LOW ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+// Nothing that casts a shadow moves, so the sun's shadow map is drawn only when
+// something new appears (see refreshShadows) instead of every frame.
+renderer.shadowMap.autoUpdate = false;
+let shadowTimer = 0;
+function refreshShadows() {
+  clearTimeout(shadowTimer);
+  shadowTimer = setTimeout(() => { renderer.shadowMap.needsUpdate = true; }, 150);
+}
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 
@@ -71,64 +82,45 @@ scene.fog = new THREE.FogExp2(FOG, 0.016);
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 320);
 camera.rotation.order = 'YXZ';
 
-// Light: soft sky fill, a low-ish sun filtering through the canopy, and the
-// Poly Haven "forest slope" HDRI for reflections and ambient color.
+// Light: soft sky fill, a low-ish sun filtering through the canopy, and the sky
+// gradient (below) for reflections and ambient color.
 const hemi = new THREE.HemisphereLight(0xc9dcff, 0x8a7d6c, 0.55);
 scene.add(hemi);
 const SUN_DIR = new THREE.Vector3(0.45, 0.82, 0.36).normalize();
 const sun = new THREE.DirectionalLight(0xffe2b8, 3.2);
 sun.position.copy(SUN_DIR).multiplyScalar(120);
-sun.target.position.set(0, 0, -10);
+sun.target.position.set(WORLD_C.x, 0, WORLD_C.z);
 sun.position.add(sun.target.position);
 sun.castShadow = true;
-sun.shadow.mapSize.set(LOW ? 2048 : 4096, LOW ? 2048 : 4096);
-Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 10, far: 260 });
+sun.shadow.mapSize.set(LOW ? 1024 : 2048, LOW ? 1024 : 2048);
+Object.assign(sun.shadow.camera, { left: -48, right: 48, top: 48, bottom: -48, near: 10, far: 260 });
 sun.shadow.bias = -0.0003;
 sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
 
-const pmrem = new THREE.PMREMGenerator(renderer);
-// Image-based light: Poly Haven's Forest Slope, packed as RGBE in a plain PNG (top half
-// RGB, bottom half the shared exponent; see tools/hdr2png.py) so any host can serve it.
-new THREE.ImageLoader().load('assets/hdri/forest_slope.png', (img) => {
-  const w = img.width, h = img.height / 2;
-  const c = document.createElement('canvas'); c.width = w; c.height = h * 2;
-  const g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(img, 0, 0);
-  const px = g.getImageData(0, 0, w, h * 2).data;
-  const half = new Uint16Array(w * h * 4);
-  for (let i = 0; i < w * h; i++) {
-    const f = Math.pow(2, px[(w * h + i) * 4] - 136);
-    for (let k = 0; k < 3; k++) half[i * 4 + k] = THREE.DataUtils.toHalfFloat(px[i * 4 + k] * f);
-    half[i * 4 + 3] = 0x3c00; // 1.0
-  }
-  const t = new THREE.DataTexture(half, w, h, THREE.RGBAFormat, THREE.HalfFloatType);
-  Object.assign(t, { flipY: true, mapping: THREE.EquirectangularReflectionMapping, magFilter: THREE.LinearFilter, minFilter: THREE.LinearFilter, generateMipmaps: false, needsUpdate: true });
-  scene.environment = pmrem.fromEquirectangular(t).texture;
-  t.dispose();
-});
-
-// Sky dome: the upper half of the same Forest Slope panorama (2K, tonemapped), so the
-// gaps in the canopy show real treetops and sky, sinking into the dark at the horizon.
+// Sky: a plain gradient, pale green-blue overhead, sinking into the dark at the
+// horizon. The same colors, blurred, light the scene's reflections.
+const SKY = { top: new THREE.Color(0xb7cfc9), mid: new THREE.Color(0x56675d), low: new THREE.Color(0x000000) };
+function skyMaterial() {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { top: { value: SKY.top }, mid: { value: SKY.mid }, low: { value: SKY.low } },
+    vertexShader: 'varying vec3 vp; void main(){ vp = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: `uniform vec3 top, mid, low; varying vec3 vp;
+      void main(){
+        float h = vp.y;
+        vec3 c = h > 0.12 ? mix(mid, top, smoothstep(0.12, 0.6, h)) : mix(low, mid, smoothstep(-0.05, 0.12, h));
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+}
 {
-  const skyTex = new THREE.TextureLoader().load('assets/hdri/forest_slope_sky.jpg');
-  skyTex.wrapS = THREE.RepeatWrapping;
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(280, 48, 24),
-    new THREE.ShaderMaterial({
-      side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { map: { value: skyTex }, mid: { value: new THREE.Color(0x56675d) }, low: { value: new THREE.Color(0x000000) } },
-      vertexShader: 'varying vec3 vp; void main(){ vp = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: `uniform sampler2D map; uniform vec3 mid, low; varying vec3 vp;
-        void main(){
-          float h = vp.y;
-          vec2 uv = vec2(atan(vp.z, vp.x) * 0.15915494 + 0.5, clamp(asin(clamp(h, 0.0, 1.0)) * 0.63661977, 0.002, 0.998));
-          vec3 top = texture2D(map, uv).rgb;
-          vec3 c = h > 0.12 ? mix(mid, top, smoothstep(0.12, 0.4, h)) : mix(low, mid, smoothstep(-0.05, 0.12, h));
-          gl_FragColor = vec4(c, 1.0);
-        }`,
-    }),
-  );
+  const envScene = new THREE.Scene();
+  envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), skyMaterial()));
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(envScene, 0.04).texture;
+  pmrem.dispose();
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(280, 32, 16), skyMaterial());
   sky.renderOrder = -1;
   scene.add(sky);
   sky.onBeforeRender = () => sky.position.copy(camera.position);
@@ -145,7 +137,18 @@ const loader = new THREE.TextureLoader();
 const manager = THREE.DefaultLoadingManager;
 const maxAniso = renderer.capabilities.getMaxAnisotropy();
 const texCache = new Map();
+// The world is low-poly and flat-colored, like the people: surfaces get a single color
+// each (the average of the Poly Haven scan they used to wear). The only images left
+// are the screenshots on screens (768 px copies in shots/w/), a small redwood bark
+// texture and two leaf silhouettes used as alpha maps (see tools/webtex.py).
+const SURFACE = {
+  asphalt: 0x5e5d58, bark: 0x5a402e, carpet: 0xcccccc, concrete: 0x6b6459, deck: 0x713612,
+  fern: 0x2f7f21, floor: 0x3a2917, grass: 0x7b9c45, gravel: 0xada99e, oak: 0xa37654,
+  planks: 0x806043, shingle: 0x948979, siding: 0x4d3e32, spray: 0x335925, tile: 0xac9986,
+};
+const surface = (name, tint = 0xffffff) => new THREE.Color(SURFACE[name]).multiply(new THREE.Color(tint));
 function loadTex(path, srgb = true) {
+  path = path.replace(/\.(jpg|png)$/, '.webp');
   if (!texCache.has(path)) {
     const t = loader.load(path);
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
@@ -155,19 +158,12 @@ function loadTex(path, srgb = true) {
   }
   return texCache.get(path);
 }
-const tex = (file) => loadTex(SHOTS + file);
+const tex = (file) => loadTex(SHOTS + 'w/' + file);
 const ptex = (file, srgb = true) => loadTex(TEX + file, srgb);
 
 function pbr(name, uv, opts = {}) {
-  const m = new THREE.MeshStandardMaterial({
-    map: opts.noMap ? null : ptex(`${name}_col.jpg`),
-    normalMap: ptex(`${name}_nrm.jpg`, false),
-    roughness: 0.85,
-    ...opts.mat,
-  });
-  if (opts.normal) m.normalScale.set(opts.normal, opts.normal);
-  m.userData.uv = uv;
-  return m;
+  const { color = 0xffffff, ...rest } = opts.mat ?? {};
+  return new THREE.MeshStandardMaterial({ roughness: 0.85, ...rest, color: surface(name, color) });
 }
 
 const matCache = new Map();
@@ -179,10 +175,7 @@ function mat(color, opts = {}) {
 const paintCache = new Map();
 function paint(color) {
   if (!paintCache.has(color)) {
-    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.92, normalMap: ptex('plaster_nrm.jpg', false) });
-    m.normalScale.set(0.5, 0.5);
-    m.userData.uv = [2, 2];
-    paintCache.set(color, m);
+    paintCache.set(color, new THREE.MeshStandardMaterial({ color, roughness: 0.92 }));
   }
   return paintCache.get(color);
 }
@@ -193,15 +186,15 @@ function carpet(color) {
 
 const M = {
   siding: pbr('siding', [1.57, 1.57], { mat: { color: 0xd8c8b8, roughness: 0.8 } }),
-  sidingGray: pbr('siding', [1.57, 1.57], { mat: { color: 0xe0ecf2, roughness: 0.8 } }),
   shingle: pbr('shingle', [3, 3], { mat: { roughness: 0.9 } }),
   planks: pbr('planks', [1.7, 1.7], { mat: { roughness: 0.45 } }),
   deck: pbr('deck', [1.8, 1.8], { mat: { color: 0xb8a898, roughness: 0.75 } }),
-  tile: pbr('tile', [1.9, 1.9], { mat: { roughness: 1, roughnessMap: ptex('tile_rgh.jpg', false) } }),
+  tile: pbr('tile', [1.9, 1.9], { mat: { roughness: 1 } }),
   concrete: pbr('concrete', [2.5, 2.5]),
   gravel: pbr('gravel', [2, 2], { mat: { roughness: 1 } }),
-  asphalt: pbr('asphalt', [3, 3], { mat: { roughness: 1, roughnessMap: ptex('asphalt_rgh.jpg', false) } }),
-  bark: new THREE.MeshStandardMaterial({ map: ptex('bark_col.jpg'), normalMap: ptex('bark_nrm.jpg', false), roughness: 0.95 }),
+  asphalt: pbr('asphalt', [3, 3], { mat: { roughness: 1 } }),
+  // Redwood bark keeps a small photo texture (256 px): the trunks fill most of the view.
+  bark: new THREE.MeshStandardMaterial({ map: ptex('bark.webp'), roughness: 0.95 }),
   trim: mat(0xf2efe6, { roughness: 0.6 }),
   darkTrim: mat(0x2e2a26, { roughness: 0.6 }),
   stone: pbr('concrete', [1.6, 1.6], { mat: { color: 0x9c958c } }),
@@ -212,7 +205,6 @@ const M = {
   steel: mat(0xc9ccd0, { metalness: 0.85, roughness: 0.3 }),
   black: mat(0x161616, { roughness: 0.4 }),
 };
-M.bark.normalScale.set(1.4, 1.4);
 const glass = new THREE.MeshStandardMaterial({ color: 0x8fa7b5, transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.0, depthWrite: false, envMapIntensity: 0.6 });
 function screenMat(file) {
   return new THREE.MeshBasicMaterial({ map: tex(file), toneMapped: false });
@@ -429,6 +421,9 @@ function model(name) {
           if (!o.isMesh) return;
           o.castShadow = true;
           o.receiveShadow = true;
+          if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+          // Flat-colored low-poly props (tools/slim.mjs) with faceted shading, like the people.
+          for (const m of [o.material].flat()) m.flatShading = true;
           // Transmission needs an extra render pass; plain transparency looks the same here.
           const ms = Array.isArray(o.material) ? o.material : [o.material];
           for (const m of ms) {
@@ -454,6 +449,7 @@ function placeModel(place, name, x, y, z, ry = 0, s = 1, tweak) {
     const o = root.clone(true);
     if (tweak) tweak(o);
     holder.add(o);
+    refreshShadows();
   });
   return holder;
 }
@@ -472,6 +468,7 @@ function scatter(name, mats) {
       im.computeBoundingSphere();
       scene.add(im);
     });
+    refreshShadows();
   });
 }
 function spin(x, y, z, s, ry = R(0, 6.28)) {
@@ -590,7 +587,17 @@ function character(name) {
   if (!characterCache.has(name)) {
     const load = (url, ok, fail) => gltf.load(url, ok, undefined, fail);
     characterCache.set(name, new Promise((resolve) => {
-      load(PEOPLE + name + '.glb', resolve, () => load(PEOPLE + name + '.gltf.json', resolve, () => resolve(null)));
+      // Their files carry no normals (tools/slim.mjs), so shade each face flat as designed.
+      const done = (g) => {
+        g.scene.traverse((o) => {
+          if (!o.isMesh) return;
+          // Some GPUs skip meshes with no normals at all; cheap to rebuild once here.
+          if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+          for (const m of [o.material].flat()) m.flatShading = true;
+        });
+        resolve(g);
+      };
+      load(PEOPLE + name + '.glb', done, () => load(PEOPLE + name + '.gltf.json', done, () => resolve(null)));
     }));
   }
   return characterCache.get(name);
@@ -631,6 +638,7 @@ function person(name, pose = {}, { s = 1, colors = {}, phone: phoneShot, project
       holder.add(ph);
     }
     holder.add(o);
+    refreshShadows();
     if (project) tag(holder, project, shot);
     holder.traverse((m) => { if (m.isMesh) pickables.push(m); });
   });
@@ -731,7 +739,7 @@ function rug(w, d, colors) {
   for (let i = 0; i < 6; i++) { g.beginPath(); g.ellipse(c.width / 2, c.height / 2, 30 + i * 30, 20 + i * 18, 0, 0, Math.PI * 2); g.globalAlpha = 0.25; g.fill(); }
   g.globalAlpha = 1;
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = maxAniso;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: t, roughness: 1, normalMap: ptex('carpet_nrm.jpg', false) }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: t, roughness: 1 }));
   m.rotation.x = -Math.PI / 2;
   m.receiveShadow = true;
   const holder = new THREE.Group(); holder.add(m); m.position.y = 0.008;
@@ -752,7 +760,7 @@ function vintagePoster(file, w, h) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = maxAniso;
-  new THREE.ImageLoader().load(SHOTS + file, (img) => {
+  new THREE.ImageLoader().load(SHOTS + 'w/' + file.replace(/\.(jpg|png)$/, '.webp'), (img) => {
     const g = c.getContext('2d');
     g.drawImage(img, 0, 0, c.width, c.height);
     // Fade toward old newsprint: desaturate, warm, lift the blacks.
@@ -921,7 +929,7 @@ function ribbon(pts, o0, o1, y, material, uvScale = [4, 4], fade = true) {
 
 // 1 inside the world, falling to 0 at its ragged edge
 function voidFade(x, z) {
-  const d = Math.hypot(x / WORLD_R.x, z / WORLD_R.z) + (noise2(x * 0.05, z * 0.05) - 0.5) * 0.12;
+  const d = Math.hypot((x - WORLD_C.x) / WORLD_R.x, (z - WORLD_C.z) / WORLD_R.z) + (noise2(x * 0.05, z * 0.05) - 0.5) * 0.12;
   return THREE.MathUtils.clamp((1 - d) / 0.22, 0, 1);
 }
 
@@ -939,10 +947,10 @@ function polyline(points, step = 0.8) {
 }
 
 function buildGround() {
-  const W = 220, D = 200, segX = 110, segZ = 100;
+  const W = 2.5 * WORLD_R.x, D = 2.5 * WORLD_R.z, segX = 48, segZ = 48;
   const geo = new THREE.PlaneGeometry(W, D, segX, segZ);
   geo.rotateX(-Math.PI / 2);
-  geo.translate(0, 0, -5);
+  geo.translate(WORLD_C.x, 0, WORLD_C.z);
   const pos = geo.attributes.position, uv = geo.attributes.uv, col = [];
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i);
@@ -952,7 +960,7 @@ function buildGround() {
     col.push(f, f * 0.98, f * 0.95);
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  const m = new THREE.MeshStandardMaterial({ map: ptex('floor_col.jpg'), normalMap: ptex('floor_nrm.jpg', false), roughness: 1, vertexColors: true });
+  const m = new THREE.MeshStandardMaterial({ color: surface('floor', 0xd8c8b0), roughness: 1, vertexColors: true });
   const ground = new THREE.Mesh(geo, m);
   ground.receiveShadow = true;
   scene.add(ground);
@@ -1049,8 +1057,8 @@ function crownGeo(H, Rb, start, crownR, density = 1) {
   return geo;
 }
 
-const leafMat = new THREE.MeshStandardMaterial({ map: ptex('spray.png'), alphaTest: 0.35, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.85, color: 0xd6e6c4 });
-leafMat.map.wrapS = leafMat.map.wrapT = THREE.ClampToEdgeWrapping;
+const leafMat = new THREE.MeshStandardMaterial({ alphaMap: ptex('spray_a.png', false), alphaTest: 0.35, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.85, color: surface('spray', 0xd6e6c4) });
+leafMat.alphaMap.wrapS = leafMat.alphaMap.wrapT = THREE.ClampToEdgeWrapping;
 
 const TREE_KINDS = [
   { H: 78, Rb: 2.2, start: 30, crown: 7.5 },
@@ -1082,10 +1090,12 @@ function clearOf(x, z, r) {
   return true;
 }
 
+const inWorld = () => [WORLD_C.x + R(-WORLD_R.x, WORLD_R.x), WORLD_C.z + R(-WORLD_R.z, WORLD_R.z)];
+
 function plantForest() {
   // Fairy rings: old trees surrounded by younger ones, plus solitary giants
-  for (let c = 0; c < 150; c++) {
-    const x = R(-WORLD_R.x, WORLD_R.x), z = R(-WORLD_R.z - 8, WORLD_R.z - 8);
+  for (let c = 0; c < 45; c++) {
+    const [x, z] = inWorld();
     const big = rand() < 0.55 ? 0 : 1;
     const s = R(0.85, 1.2);
     if (!clearOf(x, z, TREE_KINDS[big].Rb * s)) continue;
@@ -1099,8 +1109,8 @@ function plantForest() {
     }
   }
   // Young redwoods filling the gaps and edging the clearings
-  for (let i = 0; i < 170; i++) {
-    const x = R(-WORLD_R.x, WORLD_R.x), z = R(-WORLD_R.z - 8, WORLD_R.z - 8);
+  for (let i = 0; i < 60; i++) {
+    const [x, z] = inWorld();
     const s = R(0.6, 1.3);
     if (clearOf(x, z, TREE_KINDS[3].Rb * s)) trees.push({ x, z, kind: 3, s, rot: R(0, 6.28) });
   }
@@ -1159,16 +1169,16 @@ function fernGeo() {
 }
 
 function plantUndergrowth() {
-  const fm = new THREE.MeshStandardMaterial({ map: ptex('fern.png'), alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.8, color: 0xc8dcae });
-  fm.map.wrapS = fm.map.wrapT = THREE.ClampToEdgeWrapping;
+  const fm = new THREE.MeshStandardMaterial({ alphaMap: ptex('fern_a.png', false), alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.8, color: surface('fern', 0xc8dcae) });
+  fm.alphaMap.wrapS = fm.alphaMap.wrapT = THREE.ClampToEdgeWrapping;
   const spots = [];
-  for (let i = 0; i < 2000 && spots.length < 760; i++) {
+  for (let i = 0; i < 2000 && spots.length < 260; i++) {
     let x, z;
     if (rand() < 0.55 && trees.length) {
       const t = trees[Math.floor(rand() * trees.length)];
       const a = R(0, 6.28), d = TREE_KINDS[t.kind].Rb * t.s * 1.6 + R(0.8, 6);
       x = t.x + Math.cos(a) * d; z = t.z + Math.sin(a) * d;
-    } else { x = R(-WORLD_R.x, WORLD_R.x); z = R(-WORLD_R.z, WORLD_R.z); }
+    } else [x, z] = inWorld();
     if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.8) continue;
     if (CLEARINGS.some((c) => ((x - c.x) / (c.rx - 2)) ** 2 + ((z - c.z) / (c.rz - 2)) ** 2 < 1)) continue;
     if (PATHS.some((p) => p.pts.some(([px, pz]) => Math.hypot(x - px, z - pz) < p.w + 0.8))) continue;
@@ -1176,7 +1186,7 @@ function plantUndergrowth() {
     spots.push([x, z]);
   }
   // The ferns nearest the houses and the road are scanned sword ferns; the rest are cards.
-  const near = ([x, z]) => Math.min(Math.hypot(x - HOUSE.x, z - HOUSE.z) * 0.8, Math.hypot(x - HOUSE2.x, z - HOUSE2.z), Math.abs(z - roadZ(x)) * 1.6);
+  const near = ([x, z]) => Math.min(Math.hypot(x - HOUSE.x, z - HOUSE.z) * 0.8, Math.abs(z - roadZ(x)) * 1.6);
   spots.sort((a, b) => near(a) - near(b));
   const nReal = LOW ? 120 : 340;
   scatter('fern_02', spots.slice(0, nReal).map(([x, z]) => spin(x, 0, z, R(2.6, 3.6))));
@@ -1261,7 +1271,7 @@ function lightShafts() {
   const m = new THREE.MeshBasicMaterial({ map: t, color: 0xffe9c4, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: true });
   const len = 42;
   for (let i = 0; i < 14; i++) {
-    const x = R(-45, 45), z = R(-55, 35);
+    const [x, z] = inWorld();
     if (CLEARINGS.some((c) => ((x - c.x) / c.rx) ** 2 + ((z - c.z) / c.rz) ** 2 < 1)) continue;
     const w = R(1.5, 5);
     const geo = new THREE.PlaneGeometry(w, len);
@@ -1714,50 +1724,19 @@ function familyHouse(x, z, rot) {
   return h;
 }
 
-// The second house: a smaller closed house in its own clearing
-function neighborHouse(x, z, rot) {
-  const h = new Place(x, z, rot);
-  const X0 = -6, X1 = 6, Z0 = -5, Z1 = 5;
-  const outer = M.sidingGray;
-  h.box(X1 - X0 + 0.3, FL, Z1 - Z0 + 0.3, 0, FL / 2, 0, M.stone, { shadow: false });
-  const w = (lvl, xa, za, xb, zb, o, out) => h.wall(xa, za, xb, zb, FL + lvl * LEVEL, LEVEL, paint(0xe7dcc8), o, { outMat: outer, out });
-  w(0, X0, Z1, X1, Z1, [win(1.2, 3.4), door(5.4, 6.6), win(8.6, 10.8)], 1);
-  w(1, X0, Z1, X1, Z1, [win(1.5, 3.5, 1, 2.2), win(8.5, 10.5, 1, 2.2)], 1);
-  w(0, X0, Z0, X1, Z0, [win(3, 5), win(7.5, 9.5)], -1);
-  w(1, X0, Z0, X1, Z0, [win(3, 5, 1, 2.2), win(7.5, 9.5, 1, 2.2)], -1);
-  for (const ex of [X0, X1]) for (const lvl of [0, 1]) w(lvl, ex, Z0, ex, Z1, [win(4, 6, 1, 2.2)], ex > 0 ? 1 : -1);
-  for (const [cx, cz] of [[X0, Z0], [X0, Z1], [X1, Z0], [X1, Z1]]) h.box(0.26, 2 * LEVEL, 0.26, cx, FL + LEVEL, cz, M.trim, { shadow: false });
-  gableRoof(h, X0, X1, Z0, Z1, FL + 2 * LEVEL, 3.0, 0.6, outer);
-  // Curtains glowing warmly behind the glass, so nobody sees an empty house
-  h.box(X1 - X0 - 0.5, 2 * LEVEL - 0.2, Z1 - Z0 - 0.5, 0, FL + LEVEL, 0, mat(0xe9dcc0, { emissive: 0x6b5030, emissiveIntensity: 0.35 }), { shadow: false });
-  // Closed door, stoop and steps
-  h.box(1.1, 2.1, 0.06, 0, FL + 1.05, Z1 + 0.12, mat(0x1e3a5f, { roughness: 0.5 }));
-  h.box(0.05, 0.05, 0.06, 0.4, FL + 1.0, Z1 + 0.18, mat(0xc9a64a, { metalness: 0.9, roughness: 0.3 }));
-  h.slab(-1.4, 1.4, Z1, Z1 + 1.4, FL, FL, M.concrete);
-  h.slab(-1.0, 1.0, Z1 + 1.4, Z1 + 1.8, 0.22, 0.22, M.concrete);
-  h.box(2.6, 0.12, 1.8, 0, FL + 2.6, Z1 + 0.8, M.darkTrim);
-  for (const px of [-1.2, 1.2]) h.box(0.12, 2.6, 0.12, px, FL + 1.3, Z1 + 1.5, M.trim, { collide: true });
-  plant(h, -1.1, FL, Z1 + 1.1, 0.9);
-  return h;
-}
-
 // ---------------------------------------------------------------------------
 // Build the world
 
 const HOUSE = { x: -4, z: -36 }; // family house, front facing the road (south)
-const HOUSE2 = { x: 30, z: 34 }; // neighbor, front facing the road (north)
 const DRIVE_X = 13;
 const BUS = { x: 24, z: roadZ(24) - RW - SHOULDER - 2.2 };
 
 const frontWalk = polyline([[HOUSE.x + 0.25, HOUSE.z + 6 + 3.5], [HOUSE.x + 0.25, HOUSE.z + 16], [HOUSE.x - 1, roadZ(HOUSE.x) - RW]]);
 const drive = polyline([[DRIVE_X, roadZ(DRIVE_X) - RW + 0.2], [DRIVE_X - 0.5, -18], [DRIVE_X - 1.5, -26], [DRIVE_X - 1.5, -33]]);
-const drive2 = polyline([[HOUSE2.x + 9, roadZ(HOUSE2.x + 9) + RW - 0.2], [HOUSE2.x + 9.5, 18], [HOUSE2.x + 9, 30]]);
-const walk2 = polyline([[HOUSE2.x, HOUSE2.z - 5 - 1.8], [HOUSE2.x + 0.6, 22], [HOUSE2.x + 1, roadZ(HOUSE2.x) + RW]]);
-const PATHS = [{ pts: frontWalk, w: 0.8 }, { pts: drive, w: 1.8 }, { pts: drive2, w: 1.6 }, { pts: walk2, w: 0.7 }];
+const PATHS = [{ pts: frontWalk, w: 0.8 }, { pts: drive, w: 1.8 }];
 const CLEARINGS = [
   { x: HOUSE.x + 2, z: HOUSE.z + 1, rx: 19, rz: 15 },
   { x: HOUSE.x + 4, z: HOUSE.z + 13, rx: 15, rz: 7 },
-  { x: HOUSE2.x + 2, z: HOUSE2.z - 1, rx: 14, rz: 12 },
   { x: BUS.x, z: BUS.z - 0.5, rx: 7.5, rz: 4.5 },
   { x: 2, z: roadZ(2), rx: 6, rz: 9 }, // keep the spawn view open
 ];
@@ -1787,9 +1766,7 @@ function lawn(cx, cz, rx, rz) {
   const am = new THREE.CanvasTexture(c);
   // alphaMap is sampled with the main UVs, so remap them to the circle
   for (let i = 0; i < pos.count; i++) uv.setXY(i, (pos.getX(i) - cx) / rx * 0.5 + 0.5, (pos.getZ(i) - cz) / rz * 0.5 + 0.5);
-  const grass = loader.load(TEX + 'grass_col.jpg');
-  grass.colorSpace = THREE.SRGBColorSpace; grass.wrapS = grass.wrapT = THREE.RepeatWrapping; grass.anisotropy = maxAniso; grass.repeat.set(rx / 1.2, rz / 1.2);
-  const m = new THREE.MeshStandardMaterial({ map: grass, alphaMap: am, transparent: true, depthWrite: false, color: 0x7d9c5c, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const m = new THREE.MeshStandardMaterial({ alphaMap: am, transparent: true, depthWrite: false, color: surface('grass', 0x7d9c5c), roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   const msh = new THREE.Mesh(geo, m);
   msh.receiveShadow = true;
   msh.renderOrder = 1;
@@ -1797,12 +1774,9 @@ function lawn(cx, cz, rx, rz) {
 }
 lawn(HOUSE.x + 1, HOUSE.z + 13, 15, 7);
 lawn(HOUSE.x - 2, HOUSE.z - 9, 11, 5);
-lawn(HOUSE2.x, HOUSE2.z - 9, 10, 4.5);
 const gravelPath = M.gravel.clone(); gravelPath.color.set(0xc2b8a8);
 ribbon(frontWalk, -0.75, 0.75, 0.014, M.concrete, [2.5, 2.5]);
 ribbon(drive, -1.7, 1.7, 0.013, gravelPath, [2, 2]);
-ribbon(drive2, -1.5, 1.5, 0.013, gravelPath, [2, 2]);
-ribbon(walk2, -0.65, 0.65, 0.014, M.concrete, [2.5, 2.5]);
 // Parking pad by Dad's ramp
 ribbon(polyline([[DRIVE_X - 1.5, -26], [DRIVE_X - 1.5, -34]]), -2.8, 2.8, 0.0135, gravelPath, [2, 2]);
 
@@ -1817,7 +1791,7 @@ for (const l of LOGS) fallenLog(...l);
 for (const [sx, sz, sr] of [[-14, -22, 1.6], [26, -14, 2.0], [-28, 8, 1.4], [16, 14, 1.2], [-46, -30, 2.2]]) if (clearOf(sx, sz, sr)) stump(sx, sz, sr);
 // Mossy boulders and an old stump or two
 for (let i = 0, n = 0; i < 400 && n < 9; i++) {
-  const x = R(-45, 50), z = R(-50, 40);
+  const [x, z] = inWorld();
   if (!clearOf(x, z, 2.5)) continue;
   n++;
   const p = new Place(x, z, R(0, 6.28));
@@ -1826,11 +1800,9 @@ for (let i = 0, n = 0; i < 400 && n < 9; i++) {
 lightShafts();
 
 const family = familyHouse(HOUSE.x, HOUSE.z, 0);
-neighborHouse(HOUSE2.x, HOUSE2.z, Math.PI);
 busStop(BUS.x, BUS.z);
 hydrant(BUS.x - 5, roadZ(BUS.x - 5) - RW - SHOULDER - 0.4);
 mailbox(DRIVE_X + 2.2, roadZ(DRIVE_X + 2) - RW - SHOULDER - 0.2, Math.PI, 'family');
-mailbox(HOUSE2.x + 11, roadZ(HOUSE2.x + 11) + RW + SHOULDER + 0.2, 0, 'neighbor');
 
 // Dad's old project car, under a tarp in the drive
 const carPlace = new Place(DRIVE_X - 0.7, -31, 0.03);
@@ -1914,7 +1886,7 @@ function pick(ndc) {
   const hitIcon = ray.intersectObjects(icons.filter((s) => s.visible), false)[0];
   if (hitIcon) return { project: hitIcon.object.userData.project, shot: null };
   ray.far = 9;
-  const near = pickables.filter((o) => o.visible && o.getWorldPosition(_v).distanceToSquared(camera.position) < 200);
+  const near = pickables.filter((o) => o.visible && (o.userData.merged || o.getWorldPosition(_v).distanceToSquared(camera.position) < 200));
   const hit = ray.intersectObjects(near, false)[0];
   if (!hit || !hit.object.userData.project) return null;
   const split = hit.object.userData.split;
@@ -2065,19 +2037,65 @@ menu.addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Draw calls: the houses are hundreds of small boxes. Every plain, static, opaque mesh
+// built so far is merged with the others that share its material, so the GPU draws
+// a few dozen batches instead of ~800 boxes. Clickable things stay separate.
+
+function mergeStatic() {
+  const buckets = new Map(), done = [];
+  const add = (geo, material, o) => {
+    const key = [material.uuid, o.castShadow, o.receiveShadow, Object.keys(geo.attributes).sort().join()].join('|');
+    if (!buckets.has(key)) buckets.set(key, { material, o, geos: [] });
+    buckets.get(key).geos.push(geo);
+  };
+  scene.updateMatrixWorld(true);
+  scene.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some((m) => m.transparent) || o.renderOrder !== 0 || o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender) return;
+    for (let a = o; a; a = a.parent) if (a.userData.project || a.userData.split) return;
+    let g = o.geometry.clone().applyMatrix4(o.matrixWorld);
+    if (!g.index) g.setIndex([...Array(g.attributes.position.count).keys()]);
+    if (Array.isArray(o.material)) {
+      // A box with a material per face: one piece per face group.
+      for (const gr of g.groups) {
+        const part = g.clone();
+        part.setIndex(Array.from(g.index.array.slice(gr.start, gr.start + gr.count)));
+        part.clearGroups();
+        add(part, o.material[gr.materialIndex], o);
+      }
+      g.dispose();
+    } else add(g, o.material, o);
+    done.push(o);
+  });
+  for (const { material, o, geos } of buckets.values()) {
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    const m = new THREE.Mesh(merged, material);
+    m.castShadow = o.castShadow;
+    m.receiveShadow = o.receiveShadow;
+    m.userData.merged = true;
+    scene.add(m);
+  }
+  for (const o of done) o.removeFromParent();
+}
+mergeStatic();
+
+// ---------------------------------------------------------------------------
 // Loop
 
 goTo(SPOTS[location.hash.slice(1)] ?? SPOTS.start);
-const startBtn = document.getElementById('start');
-const loadingEl = document.getElementById('loading');
-manager.onProgress = (url, done, total) => { loadingEl.textContent = `Loading the forest… ${Math.round((done / total) * 100)}%`; };
+// No waiting: the world is walkable as soon as it's built, and textures, furniture
+// and people stream in behind the visitor. A thin bar at the top shows the progress.
+const barEl = document.getElementById('load-bar');
+manager.onProgress = (url, done, total) => {
+  barEl.firstElementChild.style.width = Math.round((done / total) * 100) + '%';
+  refreshShadows(); // leaf and fern cutouts shape their shadows
+};
 manager.onLoad = () => {
-  loadingEl.textContent = '';
-  startBtn.disabled = false;
+  barEl.hidden = true;
   collectPickables();
 };
-startBtn.disabled = true;
-setTimeout(() => { startBtn.disabled = false; loadingEl.textContent = ''; collectPickables(); }, 15000);
 collectPickables();
 
 addEventListener('resize', () => {
@@ -2088,8 +2106,21 @@ addEventListener('resize', () => {
 
 const clock = new THREE.Clock();
 let frame = 0;
-renderer.setAnimationLoop(() => {
-  const dt = Math.min(clock.getDelta(), 0.05);
+// Dynamic resolution: if frames take too long (a phone, an old laptop), render fewer
+// pixels; when there's headroom again, go back up.
+let pr = MAX_PR, prTime = 0, prFrames = 0;
+function adaptResolution(raw) {
+  prTime += Math.min(raw, 0.25); prFrames++;
+  if (prTime < 2) return;
+  const ms = (prTime / prFrames) * 1000;
+  const next = ms > 34 ? Math.max(0.6, pr - 0.25) : ms < 20 ? Math.min(MAX_PR, pr + 0.25) : pr;
+  if (next !== pr) { pr = next; renderer.setPixelRatio(pr); }
+  prTime = prFrames = 0;
+}
+function loop() {
+  const raw = clock.getDelta();
+  const dt = Math.min(raw, 0.05);
+  if (started) adaptResolution(raw);
   if (started && panel.hidden) update(dt);
   else update(0);
   const t = clock.elapsedTime;
@@ -2112,7 +2143,12 @@ renderer.setAnimationLoop(() => {
   }
   if (started && panel.hidden && !isTouch && (frame++ % 3 === 0)) showHint(pick(center));
   renderer.render(scene, camera);
-});
+  timing.firstFrame ??= Math.round(performance.now());
+}
+// Compile the shaders in the background (parallel where the browser can) so the
+// page stays responsive, then start drawing.
+const timing = { built: Math.round(performance.now()) };
+renderer.compileAsync(scene, camera).catch(() => {}).then(() => renderer.setAnimationLoop(loop));
 
 // For testing in a headless browser
-window.__world = { player, goTo, SPOTS, start, scene, THREE, renderer, camera, colliders, trees, pick, update };
+window.__world = { timing, player, goTo, SPOTS, start, scene, THREE, renderer, camera, colliders, trees, pick, update };
