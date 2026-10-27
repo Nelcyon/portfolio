@@ -10,7 +10,7 @@ No build step. Everything is static files; Three.js is vendored in `vendor/`.
 ## Editing
 
 - **Projects, links, status and screenshots:** `js/projects.js` (one file feeds both modes).
-- **The world:** `js/world.js`. The houses, trees, road, people and screens are built in code. Furniture and the car are small compressed glTF models in `assets/models/`, surface textures are in `assets/tex/`, and the lighting HDRI is in `assets/hdri/`. Sources and licenses are listed in [`assets/CREDITS.md`](assets/CREDITS.md).
+- **The world:** `js/world.js`. The houses, trees, road, people and screens are built in code. Everything is low-poly and flat-colored to keep it light: furniture and the car are small compressed glTF models in `assets/models/` (made with `tools/slim.mjs`), surface colors are the `SURFACE` table in `js/world.js`, and the only images are the screenshots in `assets/shots/` (in-world copies in `assets/shots/w/`, made with `tools/webtex.py`). Add `?low` to the URL to try the phone settings on a computer. Sources and licenses are listed in [`assets/CREDITS.md`](assets/CREDITS.md).
 
 ## Running locally
 

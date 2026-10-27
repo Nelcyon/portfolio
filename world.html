@@ -6,12 +6,13 @@
   <title>The Redwoods · Nelcyon</title>
   <meta name="description" content="Walk a 3D redwood forest where a family uses Nelcyon's apps and games." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@700&display=swap" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="css/world.css" />
   <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/jsm/" } }</script>
 </head>
 <body>
   <canvas id="scene"></canvas>
+  <div id="load-bar" aria-hidden="true"><i></i></div>
 
   <div class="hud top-left">
     <a class="pill" href="index.html">← Classic site</a>
@@ -40,8 +41,6 @@
         <li>Tap a screen or icon to open it</li>
       </ul>
       <button id="start" class="go" type="button">Step onto the road</button>
-      <div class="bar" aria-hidden="true"><i id="loading-bar"></i></div>
-      <p class="loading" id="loading">Loading…</p>
     </div>
   </section>
 
