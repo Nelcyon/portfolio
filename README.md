@@ -3,14 +3,14 @@
 My developer portfolio, in two modes:
 
 - **Classic** (`index.html`, `project.html?id=…`): a normal project list with a page per project showing screenshots, progress and where to play, download or buy.
-- **3D world** (`world.html`): a small first-person cul-de-sac built with Three.js, where people at the bus stop and in the houses are using the projects on their phones and screens. Click any screen or floating icon to open that project. `world.html#bettertalk` (or any project id) jumps straight to it.
+- **3D world** (`world.html`): a first-person redwood forest built with Three.js, where a family in their house (and a few people at the bus stop) use the projects on their phones and screens. Click any screen or floating icon to open that project. `world.html#bettertalk` (or any project id) jumps straight to it.
 
 No build step. Everything is static files; Three.js is vendored in `vendor/`.
 
 ## Editing
 
 - **Projects, links, status and screenshots:** `js/projects.js` (one file feeds both modes).
-- **The world:** `js/world.js`. Houses, people and screens are built in code (no model files), so it stays small.
+- **The world:** `js/world.js`. The houses, trees, road, people and screens are built in code. Furniture and the car are small compressed glTF models in `assets/models/`, surface textures are in `assets/tex/`, and the lighting HDRI is in `assets/hdri/`. Sources and licenses are listed in [`assets/CREDITS.md`](assets/CREDITS.md).
 
 ## Running locally
 

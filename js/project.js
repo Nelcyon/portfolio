@@ -48,7 +48,7 @@ main.innerHTML = `
         <h2 style="margin-top:0">Play, download or buy</h2>
         <div class="links">${links}</div>
       </div>
-      ${p.world ? `<div class="box"><h2 style="margin-top:0">In the cul-de-sac</h2><p class="note">${esc(p.world)}</p><a class="btn" href="world.html#${esc(p.id)}">Go there in 3D</a></div>` : ''}
+      ${p.world ? `<div class="box"><h2 style="margin-top:0">In the redwoods</h2><p class="note">${esc(p.world)}</p><a class="btn" href="world.html#${esc(p.id)}">Go there in 3D</a></div>` : ''}
       <div class="box"><h2 style="margin-top:0">Built with</h2><div class="chips" style="padding:0">${p.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</div></div>
     </aside>
   </section>`;
