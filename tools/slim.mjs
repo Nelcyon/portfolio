@@ -14,6 +14,8 @@ import fs from 'fs';
 import path from 'path';
 
 const MAX_TRIS = 4000; // per model; more than a low-poly prop needs
+// Ground cover is drawn hundreds of times, so it gets far fewer.
+const MAX_TRIS_FOR = { fern_02: 700, shrub_sorrel_01: 300 };
 const MIN_KEEP = { covered_car: 0.5, DiffuseTransmissionPlant: 0.15 };
 
 const toLinear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
@@ -72,7 +74,7 @@ for (const file of process.argv.slice(2)) {
   }
   let tris = 0;
   for (const m of root.listMeshes()) for (const p of m.listPrimitives()) tris += (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3;
-  const ratio = Math.max(MIN_KEEP[name] ?? 0.1, Math.min(1, MAX_TRIS / tris));
+  const ratio = Math.max(MIN_KEEP[name] ?? 0.05, Math.min(1, (MAX_TRIS_FOR[name] ?? MAX_TRIS) / tris));
   const steps = [weld(), dedup()];
   if (ratio < 1 && !file.includes('people')) steps.push(simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.02 }));
   steps.push(prune({ keepAttributes: false }), quantize(), meshopt({ encoder: MeshoptEncoder, level: 'high' }));
