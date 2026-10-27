@@ -55,11 +55,36 @@ function tip(bone, axis, angle) {
   bone.updateWorldMatrix(false, true);
 }
 
-// Curl every finger joint a little so hands don't look like paddles.
+// Set a bone's world orientation from where its +Y should run and which way its -Z faces.
+// On these rigs a hand's +Y runs down the fingers and -Z is the palm, on both sides.
+function orient(bone, along, palm) {
+  const y = along.clone().normalize();
+  const z = palm.clone().negate();
+  z.sub(y.clone().multiplyScalar(z.dot(y))).normalize();
+  const x = new THREE.Vector3().crossVectors(y, z);
+  q2.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  bone.parent.updateWorldMatrix(true, false);
+  bone.parent.getWorldQuaternion(q3).invert();
+  bone.quaternion.copy(q3.multiply(q2));
+  bone.updateWorldMatrix(false, true);
+}
+
+// Bend the fingers in toward the palm (negative X on these rigs); joint 2 is the knuckle.
 function curl(b, side, amount) {
-  for (const f of ['Index', 'Middle', 'Ring', 'Pinky']) for (let i = 2; i <= 4; i++) {
-    const bone = b[f + i + side];
-    if (bone) bone.rotateX(amount);
+  for (const f of ['Index', 'Middle', 'Ring', 'Pinky']) {
+    const spread = f === 'Index' ? 0.85 : f === 'Pinky' ? 1.15 : 1;
+    for (let i = 2; i <= 4; i++) {
+      const bone = b[f + i + side];
+      if (bone) bone.rotateX(-amount * spread * (i === 2 ? 1 : 0.8));
+    }
+  }
+}
+
+// Lay the thumb along toward a point (world space).
+function thumbTo(b, side, target) {
+  for (const i of [2, 3]) {
+    const bone = b['Thumb' + i + side];
+    if (bone) aim(bone, target.clone().sub(wpos(bone)));
   }
 }
 
@@ -69,8 +94,10 @@ function curl(b, side, amount) {
  *   sit: seat height in meters (omit to stand),
  *   feet: [x, z] of the ankles when sitting (mirrored for the left foot),
  *   lean: forward lean of the back (radians), head: head pitch down (radians), turn: head yaw,
- *   hands: [[x, y, z], [x, y, z]] right then left hand targets, x outward from the middle,
- *   elbows: [x, y, z] which way the elbows bow (x outward), grip: finger curl,
+ *   hands: [[x, y, z], [x, y, z]] right then left palm centers, x outward from the middle; palms down,
+ *   along: [x, y, z] the way the fingers point (x outward), grip: finger curl,
+ *   phone: [x, y, z] center of a phone held in both hands (sets bones.phone = { position, quaternion }),
+ *   elbows: [x, y, z] which way the elbows bow (x outward),
  *   scale: how much the character will be scaled afterwards (targets are given at final size)
  * }
  * Returns the bones so callers can hang things off hands.
@@ -108,17 +135,46 @@ export function posePerson(root, idle, pose = {}) {
   if (pose.lean) { tip(b.Abdomen, new THREE.Vector3(1, 0, 0), pose.lean * 0.5); tip(b.Chest, new THREE.Vector3(1, 0, 0), pose.lean * 0.5); }
   if (pose.turn) tip(b.Neck, UP, pose.turn);
   if (pose.head) tip(b.Head, new THREE.Vector3(1, 0, 0), pose.head);
-  if (pose.hands) {
+  const placeHand = (i, target, along, palm, grip) => {
+    const s = i ? 'L' : 'R', m = i ? 1 : -1;
     const [ex, ey, ez] = pose.elbows || [0.35, -0.2, -0.1];
+    // The arm reaches so the wrist lands where the hand's heel should be.
+    const wrist = target.clone().addScaledVector(along, -0.07 * k);
+    reach(b['UpperArm' + s], b['LowerArm' + s], upperArm, foreArm, wrist, wpos(b['UpperArm' + s]).add(new THREE.Vector3(ex * m, ey, ez)));
+    orient(b['Wrist' + s], along, palm);
+    curl(b, s, grip);
+    return s;
+  };
+  if (pose.phone) {
+    // Both hands cradle a portrait phone from behind, thumbs on the screen.
+    root.updateMatrixWorld(true);
+    const [px, py, pz] = pose.phone;
+    const at = new THREE.Vector3(px, py * k, pz * k);
+    const eye = wpos(b.Head).add(new THREE.Vector3(0, 0.08, 0.1));
+    const n = eye.sub(at).normalize(); // screen faces the eyes
+    const up = UP.clone().sub(n.clone().multiplyScalar(n.y)).normalize();
+    const left = new THREE.Vector3().crossVectors(n, up); // toward the character's left (+X)
+    [0, 1].forEach((i) => {
+      const m = i ? 1 : -1;
+      const out = left.clone().multiplyScalar(m);
+      // Palm behind the lower corner, fingers reaching up and across the back.
+      const heel = at.clone().addScaledVector(out, 0.065).addScaledVector(up, -0.09).addScaledVector(n, -0.025);
+      const along = up.clone().addScaledVector(out, -0.1).normalize();
+      const s = placeHand(i, heel.addScaledVector(along, 0.07), along, n.clone().addScaledVector(out, -0.3), 0.12);
+      root.updateMatrixWorld(true);
+      thumbTo(b, s, at.clone().addScaledVector(out, 0.012).addScaledVector(up, -0.01).addScaledVector(n, 0.02));
+    });
+    b.phone = { position: at, quaternion: new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(left.negate(), up, n)) };
+  }
+  if (pose.hands) {
+    // Hands lie flat (palms down, fingers forward) unless told otherwise: lap, desk, keyboard.
     pose.hands.forEach((h, i) => {
       const [x, y, z] = h.map((v) => v * k);
       // x is measured outward from the middle: the right side is -X.
-      const s = i ? 'L' : 'R', m = i ? 1 : -1;
-      const shoulder = wpos(b['UpperArm' + s]);
-      reach(b['UpperArm' + s], b['LowerArm' + s], upperArm, foreArm, new THREE.Vector3(x * m, y, z), shoulder.add(new THREE.Vector3(ex * m, ey, ez)));
-      // Hand carries on along the forearm, tipped down a touch
-      aim(b['Wrist' + s], new THREE.Vector3(x * m, y, z).sub(wpos(b['LowerArm' + s])).add(new THREE.Vector3(0, -0.06, 0)));
-      curl(b, s, pose.grip ?? 0.35);
+      const m = i ? 1 : -1;
+      const [ax, ay, az] = pose.along || [0.15, -0.15, 1];
+      const along = new THREE.Vector3(-ax * m, ay, az).normalize();
+      placeHand(i, new THREE.Vector3(x * m, y, z), along, pose.palm ? new THREE.Vector3(pose.palm[0] * m, pose.palm[1], pose.palm[2]) : new THREE.Vector3(0.25 * -m, -1, 0), pose.grip ?? 0.3);
     });
   }
   root.updateMatrixWorld(true);

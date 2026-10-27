@@ -17,7 +17,6 @@ From the [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sampl
 | `SpecularSilkPouf.glb` | Pouf in the daughter's room | Eric Chadwick, © 2023 Wayfair LLC | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | `IridescenceLamp.glb` | Bedside lamps | Eric Chadwick, © Wayfair LLC | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | `DiffuseTransmissionPlant.glb` | Potted plants | Eric Chadwick, © Darmstadt Graphics Group GmbH; Rico Cilliers (CC0) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| `CarConcept.glb` | The two cars | Eric Chadwick, © Darmstadt Graphics Group GmbH | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
 ### Poly Haven models
 
@@ -44,6 +43,8 @@ From [Poly Haven](https://polyhaven.com/models), all [CC0 1.0](https://creativec
 | `ClassicNightstand_01.glb` | Nightstands | [Classic Nightstand 01](https://polyhaven.com/a/ClassicNightstand_01) |
 | `Rockingchair_01.glb` | Rocking chair on the porch | [Rocking Chair 01](https://polyhaven.com/a/Rockingchair_01) |
 | `throw_pillows_01.glb` | Pillows on the porch swing | [Throw Pillows 01](https://polyhaven.com/a/throw_pillows_01) |
+| `covered_car.glb` | Dad's project car under a tarp in the drive | [Covered Car](https://polyhaven.com/a/covered_car) |
+| `fancy_picture_frame_01.glb` | Frame on the vintage Roadside Rivals poster | [Fancy Picture Frame 01](https://polyhaven.com/a/fancy_picture_frame_01) |
 
 ## People (`assets/people/`)
 
