@@ -395,21 +395,26 @@ gltf.setMeshoptDecoder(MeshoptDecoder);
 const modelCache = new Map();
 function model(name) {
   if (!modelCache.has(name)) {
-    modelCache.set(name, new Promise((resolve) => gltf.load(MODELS + name + '.glb', (g) => {
-      g.scene.traverse((o) => {
-        if (!o.isMesh) return;
-        o.castShadow = true;
-        o.receiveShadow = true;
-        // Transmission needs an extra render pass; plain transparency looks the same here.
-        const ms = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of ms) {
-          if (m.transmission > 0) { m.transmission = 0; m.transparent = true; m.opacity = 0.45; }
-          // Compression dropped unused second UV sets; point any map that wanted one at the first.
-          for (const k in m) if (m[k]?.isTexture && m[k].channel > 0 && !o.geometry.attributes['uv' + m[k].channel]) m[k].channel = 0;
-        }
-      });
-      resolve(g.scene);
-    }, undefined, () => resolve(null))));
+    // Hosts that can't serve .glb (the Claude preview) get the same model as embedded glTF JSON.
+    const load = (url, ok, fail) => gltf.load(url, ok, undefined, fail);
+    modelCache.set(name, new Promise((resolve) => {
+      const done = (g) => {
+        g.scene.traverse((o) => {
+          if (!o.isMesh) return;
+          o.castShadow = true;
+          o.receiveShadow = true;
+          // Transmission needs an extra render pass; plain transparency looks the same here.
+          const ms = Array.isArray(o.material) ? o.material : [o.material];
+          for (const m of ms) {
+            if (m.transmission > 0) { m.transmission = 0; m.transparent = true; m.opacity = 0.45; }
+            // Compression dropped unused second UV sets; point any map that wanted one at the first.
+            for (const k in m) if (m[k]?.isTexture && m[k].channel > 0 && !o.geometry.attributes['uv' + m[k].channel]) m[k].channel = 0;
+          }
+        });
+        resolve(g.scene);
+      };
+      load(MODELS + name + '.glb', done, () => load(MODELS + name + '.gltf.json', done, () => resolve(null)));
+    }));
   }
   return modelCache.get(name);
 }
