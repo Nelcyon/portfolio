@@ -687,7 +687,11 @@ function houseShell(place, { wallColor, trimColor, roofColor, frontOpen, sideOpe
     place.wall(xR, zB, xR, zF, y, LEVEL, wallM, lvl === 0 ? sideOpen : [win(3.5, 5.5)]);
   }
   // Trim band between floors
-  place.box(HW + 0.1, 0.18, HD + 0.1, 0, FL + LEVEL, 0, mat(trimColor), { shadow: false });
+  const trim = mat(trimColor), ty = FL + LEVEL;
+  place.box(HW + 0.3, 0.18, 0.1, 0, ty, HD / 2 + 0.12, trim, { shadow: false });
+  place.box(HW + 0.3, 0.18, 0.1, 0, ty, -HD / 2 - 0.12, trim, { shadow: false });
+  place.box(0.1, 0.18, HD + 0.3, HW / 2 + 0.12, ty, 0, trim, { shadow: false });
+  place.box(0.1, 0.18, HD + 0.3, -HW / 2 - 0.12, ty, 0, trim, { shadow: false });
   // Gable roof (ridge parallel to the front)
   const shape = new THREE.Shape();
   shape.moveTo(-HD / 2 - 0.5, 0); shape.lineTo(HD / 2 + 0.5, 0); shape.lineTo(0, 2.6); shape.closePath();
@@ -777,10 +781,10 @@ function house1(x, z, rot) {
   h.add(rider, 3.85, FL, -0.5, Math.PI / 2);
   tag(rider, 'bettertalk', 'bettertalk-main.png');
   h.collider(3.85, -0.5, 0.45, 0.45, 0, 1.4);
-  const [btx, btz] = h.world(4.2, -1.3);
-  addIcon('bettertalk', btx, 2.5, btz);
-  const [rcx, rcz] = h.world(4.2, 0.4);
-  addIcon('rubecube', rcx, 2.5, rcz);
+  const [btx, btz] = h.world(4.2, -1.9);
+  addIcon('bettertalk', btx, 2.85, btz);
+  const [rcx, rcz] = h.world(4.2, 0.9);
+  addIcon('rubecube', rcx, 2.3, rcz);
 
   // A sofa, a rug, a plant and a lamp
   h.box(2.2, 0.45, 0.85, 0.5, FL + 0.22, 3.7, mat(0x6b7280), { collide: true });
@@ -1235,12 +1239,19 @@ renderer.setAnimationLoop(() => {
   if (started && panel.hidden) update(dt);
   else update(0);
   const t = clock.elapsedTime;
+  // Where a project appears more than once, only its nearest icon shows.
+  const nearest = new Map();
+  for (const s of icons) {
+    const d = s.position.distanceTo(camera.position);
+    const cur = nearest.get(s.userData.project);
+    if (!cur || d < cur.d) nearest.set(s.userData.project, { s, d });
+  }
   for (const s of icons) {
     s.position.y = s.userData.baseY + Math.sin(t * 1.6 + s.userData.phase) * 0.08;
     const d = s.position.distanceTo(camera.position);
     // Fade out up close so icons never cover the screens they point at.
     s.material.opacity = THREE.MathUtils.clamp((d - 2.5) / 3, 0, 1);
-    s.visible = s.material.opacity > 0.02;
+    s.visible = s.material.opacity > 0.02 && nearest.get(s.userData.project).s === s;
     // Keep far icons readable: never smaller on screen than one seen from 9 m.
     const k = Math.max(1, d / 9);
     s.scale.set(1.3 * k, 0.41 * k, 1);
@@ -1250,4 +1261,4 @@ renderer.setAnimationLoop(() => {
 });
 
 // For testing in a headless browser
-window.__world = { player, goTo, SPOTS, start };
+window.__world = { player, goTo, SPOTS, start, scene, THREE };
