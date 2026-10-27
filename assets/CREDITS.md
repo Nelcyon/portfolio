@@ -63,9 +63,10 @@ Characters by [Quaternius](https://quaternius.com/), all [CC0 1.0](https://creat
 
 The women come from the pack's individual glTF files. The men pack's combined `Humans_Master.fbx` was split into these people by `tools/people_fbx.html`. Everything was then packed by `tools/people.mjs` (idle frame only, meshopt) and slimmed by `tools/slim.mjs`.
 
-## Leaves (`assets/tex/`)
+## Leaves and bark (`assets/tex/`)
 
 - `spray_a.webp` (redwood foliage) and `fern_a.webp` (distant fern cards) are leaf silhouettes generated procedurally for this site (`tools/gentex.py`, then `tools/webtex.py`), released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+- `bark.webp`: [Metasequoia Bark](https://polyhaven.com/a/metasequoia_bark) from Poly Haven, [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), resized to 256 px.
 
 ## Flat colors
 

@@ -138,9 +138,9 @@ const manager = THREE.DefaultLoadingManager;
 const maxAniso = renderer.capabilities.getMaxAnisotropy();
 const texCache = new Map();
 // The world is low-poly and flat-colored, like the people: surfaces get a single color
-// each (the average of the Poly Haven scan they used to wear), and the only images
-// left are the screenshots on screens (768 px copies in shots/w/) and two leaf
-// silhouettes used as alpha maps (see tools/webtex.py).
+// each (the average of the Poly Haven scan they used to wear). The only images left
+// are the screenshots on screens (768 px copies in shots/w/), a small redwood bark
+// texture and two leaf silhouettes used as alpha maps (see tools/webtex.py).
 const SURFACE = {
   asphalt: 0x5e5d58, bark: 0x5a402e, carpet: 0xcccccc, concrete: 0x6b6459, deck: 0x713612,
   fern: 0x2f7f21, floor: 0x3a2917, grass: 0x7b9c45, gravel: 0xada99e, oak: 0xa37654,
@@ -193,7 +193,8 @@ const M = {
   concrete: pbr('concrete', [2.5, 2.5]),
   gravel: pbr('gravel', [2, 2], { mat: { roughness: 1 } }),
   asphalt: pbr('asphalt', [3, 3], { mat: { roughness: 1 } }),
-  bark: new THREE.MeshStandardMaterial({ color: surface('bark', 0xb08a70), roughness: 0.95, flatShading: true }),
+  // Redwood bark keeps a small photo texture (256 px): the trunks fill most of the view.
+  bark: new THREE.MeshStandardMaterial({ map: ptex('bark.webp'), roughness: 0.95 }),
   trim: mat(0xf2efe6, { roughness: 0.6 }),
   darkTrim: mat(0x2e2a26, { roughness: 0.6 }),
   stone: pbr('concrete', [1.6, 1.6], { mat: { color: 0x9c958c } }),
@@ -420,6 +421,7 @@ function model(name) {
           if (!o.isMesh) return;
           o.castShadow = true;
           o.receiveShadow = true;
+          if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
           // Flat-colored low-poly props (tools/slim.mjs) with faceted shading, like the people.
           for (const m of [o.material].flat()) m.flatShading = true;
           // Transmission needs an extra render pass; plain transparency looks the same here.
@@ -587,7 +589,12 @@ function character(name) {
     characterCache.set(name, new Promise((resolve) => {
       // Their files carry no normals (tools/slim.mjs), so shade each face flat as designed.
       const done = (g) => {
-        g.scene.traverse((o) => { if (o.isMesh) for (const m of [o.material].flat()) m.flatShading = true; });
+        g.scene.traverse((o) => {
+          if (!o.isMesh) return;
+          // Some GPUs skip meshes with no normals at all; cheap to rebuild once here.
+          if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+          for (const m of [o.material].flat()) m.flatShading = true;
+        });
         resolve(g);
       };
       load(PEOPLE + name + '.glb', done, () => load(PEOPLE + name + '.gltf.json', done, () => resolve(null)));
