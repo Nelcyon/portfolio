@@ -40,6 +40,8 @@ kbd { display: inline-block; min-width: 24px; text-align: center; padding: 1px 6
 .go { font: inherit; font-weight: 700; font-size: 16px; padding: 12px 20px; border-radius: 10px; border: 0; background: #ffd34d; color: #1a1500; cursor: pointer; }
 .go:disabled { opacity: 0.5; cursor: wait; }
 .loading { font-size: 13px; margin: 12px 0 0 !important; }
+.intro-card .bar { height: 4px; margin: 14px 0 0; border-radius: 2px; background: var(--line); overflow: hidden; }
+.intro-card .bar i { display: block; height: 100%; width: 0; background: #ffd34d; transition: width 0.2s; }
 
 .panel-card { max-width: min(1400px, 94vw); position: relative; overflow: hidden; display: grid; grid-template-columns: 1.7fr 1fr; }
 .panel-card .shot { background: #000; display: grid; place-items: center; min-height: min(60vh, 640px); max-height: 86vh; }

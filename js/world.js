@@ -22,7 +22,7 @@ const EYE = 1.65;
 const RADIUS = 0.3; // visitor's body radius for collisions
 const STEP = 0.45; // highest step the visitor can walk up
 const isTouch = matchMedia('(pointer: coarse)').matches;
-const LOW = isTouch || /[?&]low\b/.test(location.search); // lighter shadows for phones
+const LOW = isTouch || /[?&]low\b/.test(location.search); // phones: smaller textures, lighter shadows
 
 // Road: a gentle curve along x
 const RW = 3.6; // asphalt half width
@@ -56,10 +56,19 @@ function noise2(x, z) {
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2));
+const MAX_PR = Math.min(window.devicePixelRatio, LOW ? 1.5 : 2);
+renderer.setPixelRatio(MAX_PR);
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = LOW ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+// Nothing that casts a shadow moves, so the sun's shadow map is drawn only when
+// something new appears (see refreshShadows) instead of every frame.
+renderer.shadowMap.autoUpdate = false;
+let shadowTimer = 0;
+function refreshShadows() {
+  clearTimeout(shadowTimer);
+  shadowTimer = setTimeout(() => { renderer.shadowMap.needsUpdate = true; }, 150);
+}
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 
@@ -81,7 +90,7 @@ sun.position.copy(SUN_DIR).multiplyScalar(120);
 sun.target.position.set(0, 0, -10);
 sun.position.add(sun.target.position);
 sun.castShadow = true;
-sun.shadow.mapSize.set(LOW ? 2048 : 4096, LOW ? 2048 : 4096);
+sun.shadow.mapSize.set(LOW ? 1024 : 4096, LOW ? 1024 : 4096);
 Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 10, far: 260 });
 sun.shadow.bias = -0.0003;
 sun.shadow.normalBias = 0.04;
@@ -110,8 +119,9 @@ new THREE.ImageLoader().load('assets/hdri/forest_slope.png', (img) => {
 
 // Sky dome: the upper half of the same Forest Slope panorama (2K, tonemapped), so the
 // gaps in the canopy show real treetops and sky, sinking into the dark at the horizon.
+// Phones get it at half size.
 {
-  const skyTex = new THREE.TextureLoader().load('assets/hdri/forest_slope_sky.jpg');
+  const skyTex = new THREE.TextureLoader().load(LOW ? 'assets/hdri/forest_slope_sky_m.webp' : 'assets/hdri/forest_slope_sky.webp');
   skyTex.wrapS = THREE.RepeatWrapping;
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(280, 48, 24),
@@ -145,7 +155,11 @@ const loader = new THREE.TextureLoader();
 const manager = THREE.DefaultLoadingManager;
 const maxAniso = renderer.capabilities.getMaxAnisotropy();
 const texCache = new Map();
+// Textures are WebP: full size in tex/, half size for phones in tex/m/, and the
+// screenshots on in-world screens are 768 px copies in shots/w/ (see tools/webtex.py).
 function loadTex(path, srgb = true) {
+  path = path.replace(/\.(jpg|png)$/, '.webp');
+  if (LOW) path = path.replace(TEX, TEX + 'm/');
   if (!texCache.has(path)) {
     const t = loader.load(path);
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
@@ -155,7 +169,7 @@ function loadTex(path, srgb = true) {
   }
   return texCache.get(path);
 }
-const tex = (file) => loadTex(SHOTS + file);
+const tex = (file) => loadTex(SHOTS + 'w/' + file);
 const ptex = (file, srgb = true) => loadTex(TEX + file, srgb);
 
 function pbr(name, uv, opts = {}) {
@@ -454,6 +468,7 @@ function placeModel(place, name, x, y, z, ry = 0, s = 1, tweak) {
     const o = root.clone(true);
     if (tweak) tweak(o);
     holder.add(o);
+    refreshShadows();
   });
   return holder;
 }
@@ -472,6 +487,7 @@ function scatter(name, mats) {
       im.computeBoundingSphere();
       scene.add(im);
     });
+    refreshShadows();
   });
 }
 function spin(x, y, z, s, ry = R(0, 6.28)) {
@@ -631,6 +647,7 @@ function person(name, pose = {}, { s = 1, colors = {}, phone: phoneShot, project
       holder.add(ph);
     }
     holder.add(o);
+    refreshShadows();
     if (project) tag(holder, project, shot);
     holder.traverse((m) => { if (m.isMesh) pickables.push(m); });
   });
@@ -1787,8 +1804,8 @@ function lawn(cx, cz, rx, rz) {
   const am = new THREE.CanvasTexture(c);
   // alphaMap is sampled with the main UVs, so remap them to the circle
   for (let i = 0; i < pos.count; i++) uv.setXY(i, (pos.getX(i) - cx) / rx * 0.5 + 0.5, (pos.getZ(i) - cz) / rz * 0.5 + 0.5);
-  const grass = loader.load(TEX + 'grass_col.jpg');
-  grass.colorSpace = THREE.SRGBColorSpace; grass.wrapS = grass.wrapT = THREE.RepeatWrapping; grass.anisotropy = maxAniso; grass.repeat.set(rx / 1.2, rz / 1.2);
+  const grass = ptex('grass_col.jpg').clone();
+  grass.repeat.set(rx / 1.2, rz / 1.2);
   const m = new THREE.MeshStandardMaterial({ map: grass, alphaMap: am, transparent: true, depthWrite: false, color: 0x7d9c5c, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   const msh = new THREE.Mesh(geo, m);
   msh.receiveShadow = true;
@@ -1914,7 +1931,7 @@ function pick(ndc) {
   const hitIcon = ray.intersectObjects(icons.filter((s) => s.visible), false)[0];
   if (hitIcon) return { project: hitIcon.object.userData.project, shot: null };
   ray.far = 9;
-  const near = pickables.filter((o) => o.visible && o.getWorldPosition(_v).distanceToSquared(camera.position) < 200);
+  const near = pickables.filter((o) => o.visible && (o.userData.merged || o.getWorldPosition(_v).distanceToSquared(camera.position) < 200));
   const hit = ray.intersectObjects(near, false)[0];
   if (!hit || !hit.object.userData.project) return null;
   const split = hit.object.userData.split;
@@ -2065,19 +2082,73 @@ menu.addEventListener('click', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Draw calls: the houses are hundreds of small boxes. Every plain, static, opaque mesh
+// built so far is merged with the others that share its material, so the GPU draws
+// a few dozen batches instead of ~800 boxes. Clickable things stay separate.
+
+function mergeStatic() {
+  const buckets = new Map(), done = [];
+  const add = (geo, material, o) => {
+    const key = [material.uuid, o.castShadow, o.receiveShadow, Object.keys(geo.attributes).sort().join()].join('|');
+    if (!buckets.has(key)) buckets.set(key, { material, o, geos: [] });
+    buckets.get(key).geos.push(geo);
+  };
+  scene.updateMatrixWorld(true);
+  scene.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some((m) => m.transparent) || o.renderOrder !== 0 || o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender) return;
+    for (let a = o; a; a = a.parent) if (a.userData.project || a.userData.split) return;
+    let g = o.geometry.clone().applyMatrix4(o.matrixWorld);
+    if (!g.index) g.setIndex([...Array(g.attributes.position.count).keys()]);
+    if (Array.isArray(o.material)) {
+      // A box with a material per face: one piece per face group.
+      for (const gr of g.groups) {
+        const part = g.clone();
+        part.setIndex(Array.from(g.index.array.slice(gr.start, gr.start + gr.count)));
+        part.clearGroups();
+        add(part, o.material[gr.materialIndex], o);
+      }
+      g.dispose();
+    } else add(g, o.material, o);
+    done.push(o);
+  });
+  for (const { material, o, geos } of buckets.values()) {
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    const m = new THREE.Mesh(merged, material);
+    m.castShadow = o.castShadow;
+    m.receiveShadow = o.receiveShadow;
+    m.userData.merged = true;
+    scene.add(m);
+  }
+  for (const o of done) o.removeFromParent();
+}
+mergeStatic();
+
+// ---------------------------------------------------------------------------
 // Loop
 
 goTo(SPOTS[location.hash.slice(1)] ?? SPOTS.start);
 const startBtn = document.getElementById('start');
 const loadingEl = document.getElementById('loading');
-manager.onProgress = (url, done, total) => { loadingEl.textContent = `Loading the forest… ${Math.round((done / total) * 100)}%`; };
-manager.onLoad = () => {
+const barEl = document.getElementById('loading-bar');
+manager.onProgress = (url, done, total) => {
+  const pct = Math.round((done / total) * 100);
+  loadingEl.textContent = `Loading the forest… ${pct}%`;
+  barEl.style.width = pct + '%';
+  refreshShadows(); // leaf and fern cutouts shape their shadows
+};
+function ready() {
   loadingEl.textContent = '';
+  barEl.parentElement.hidden = true;
   startBtn.disabled = false;
   collectPickables();
-};
+}
+manager.onLoad = ready;
 startBtn.disabled = true;
-setTimeout(() => { startBtn.disabled = false; loadingEl.textContent = ''; collectPickables(); }, 15000);
+// On a slow connection, let people in anyway; the rest fills in as it arrives.
+setTimeout(ready, 10000);
 collectPickables();
 
 addEventListener('resize', () => {
@@ -2088,8 +2159,21 @@ addEventListener('resize', () => {
 
 const clock = new THREE.Clock();
 let frame = 0;
+// Dynamic resolution: if frames take too long (a phone, an old laptop), render fewer
+// pixels; when there's headroom again, go back up.
+let pr = MAX_PR, prTime = 0, prFrames = 0;
+function adaptResolution(raw) {
+  prTime += Math.min(raw, 0.25); prFrames++;
+  if (prTime < 2) return;
+  const ms = (prTime / prFrames) * 1000;
+  const next = ms > 34 ? Math.max(0.6, pr - 0.25) : ms < 20 ? Math.min(MAX_PR, pr + 0.25) : pr;
+  if (next !== pr) { pr = next; renderer.setPixelRatio(pr); }
+  prTime = prFrames = 0;
+}
 renderer.setAnimationLoop(() => {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const raw = clock.getDelta();
+  const dt = Math.min(raw, 0.05);
+  if (started) adaptResolution(raw);
   if (started && panel.hidden) update(dt);
   else update(0);
   const t = clock.elapsedTime;
