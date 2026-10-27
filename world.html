@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>The Cul-de-sac · Nelcyon</title>
-  <meta name="description" content="Walk a small 3D cul-de-sac where people use Nelcyon's apps and games." />
+  <title>The Redwoods · Nelcyon</title>
+  <meta name="description" content="Walk a 3D redwood forest where a family uses Nelcyon's apps and games." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@700&display=swap" />
   <link rel="stylesheet" href="css/world.css" />
-  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/jsm/" } }</script>
 </head>
 <body>
   <canvas id="scene"></canvas>
@@ -28,8 +28,8 @@
 
   <section id="intro" class="overlay">
     <div class="intro-card">
-      <h1>The Cul-de-sac</h1>
-      <p>You're standing in the street at the end of a quiet cul-de-sac. The people here use my apps and games. Walk up to them, go inside the houses, and click any screen or floating icon to learn about that project.</p>
+      <h1>The Redwoods</h1>
+      <p>You're standing on a quiet road through old-growth redwoods. Up the drive, a whole family is using my apps and games: Dad in the den, the kids upstairs, Grandma in the kitchen and Grandpa on the porch. Walk in, look around, and click any screen or floating icon to learn about that project.</p>
       <ul class="keys desktop-only">
         <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run</li>
         <li>Mouse to look around · <kbd>Esc</kbd> to free the mouse</li>
@@ -39,7 +39,7 @@
         <li>Left thumb: walk · drag anywhere else: look</li>
         <li>Tap a screen or icon to open it</li>
       </ul>
-      <button id="start" class="go" type="button">Step into the street</button>
+      <button id="start" class="go" type="button">Step onto the road</button>
       <p class="loading" id="loading">Loading…</p>
     </div>
   </section>

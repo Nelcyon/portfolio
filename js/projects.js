@@ -1,4 +1,4 @@
-// Every project shown on the site and in the cul-de-sac world.
+// Every project shown on the site and in the 3D redwoods world.
 // Edit this one file to change descriptions, links, status or screenshots.
 //
 // status.kind: "beta" | "playable" | "dev" | "concept" | "mod"
@@ -50,7 +50,7 @@ export const PROJECTS = [
       { src: 'assets/shots/bettertalk-main.png', caption: 'The main window: urgent buttons, word suggestions and keyboard', kind: 'desktop' },
       { src: 'assets/shots/bettertalk-itch.jpg', caption: 'Point to where it itches on a 3D figure', kind: 'desktop' },
     ],
-    world: 'Downstairs in the house by the bus stop, docked in the corner of a 40" monitor in front of a wheelchair user.',
+    world: 'In Dad\'s den downstairs, docked in the corner of his 40" monitor. He uses a wheelchair and a QuadStick.',
   },
   {
     id: 'rubecube',
@@ -86,7 +86,7 @@ export const PROJECTS = [
       { src: 'assets/shots/rubecube-desktop.jpg', caption: 'On a desktop monitor', kind: 'desktop' },
       { src: 'assets/shots/rubecube-phone.jpg', caption: 'On a phone', kind: 'phone' },
     ],
-    world: 'On the 40" monitor downstairs in the house by the bus stop, with BetterTalk in the corner.',
+    world: 'On Dad\'s 40" monitor in the den downstairs, with BetterTalk in the corner.',
   },
   {
     id: 'roadway-rivals',
@@ -121,7 +121,7 @@ export const PROJECTS = [
       { src: 'assets/shots/roadway-desktop.jpg', caption: 'On a PC', kind: 'desktop' },
       { src: 'assets/shots/roadway-score-phone.jpg', caption: 'End-of-trip score', kind: 'phone' },
     ],
-    world: 'On a phone at the bus stop, and on the computer of the kid upstairs, who is playing against the person at the bus stop.',
+    world: 'On the son\'s computer upstairs, on Mom\'s phone on the living room sofa, and on a phone at the bus stop down the road. They are all in the same game.',
   },
   {
     id: 'bridge-defender',
@@ -154,7 +154,7 @@ export const PROJECTS = [
       { src: 'assets/shots/bridge-defender-gameplay.jpg', caption: 'Forest level 1: skeletons crossing toward the bridge', kind: 'phone' },
       { src: 'assets/shots/bridge-defender-title.jpg', caption: 'Title art', kind: 'phone' },
     ],
-    world: 'On the vertical second monitor of the kid upstairs, and on a phone at the bus stop.',
+    world: 'On the vertical second monitor in the son\'s room upstairs, and on a phone at the bus stop.',
   },
   {
     id: 'seraph',
@@ -178,7 +178,7 @@ export const PROJECTS = [
     timeline: [{ date: 'Oct 2026', title: 'First prototype builds', text: 'Windows and Linux builds published with automatic releases.' }],
     links: [],
     gallery: [{ src: 'assets/shots/seraph-gameplay.jpg', caption: 'The Paladin in a torch-lit dungeon, with the ability bar and combat log', kind: 'desktop' }],
-    world: 'On the second kid’s computer upstairs, in the shared bedroom.',
+    world: 'On the daughter\'s computer in her room upstairs.',
   },
   {
     id: 'family-card-table',
@@ -212,7 +212,7 @@ export const PROJECTS = [
       { src: 'assets/shots/fct-desktop.jpg', caption: 'Hearts on a computer, with table chat', kind: 'desktop' },
       { src: 'assets/shots/fct-phone.jpg', caption: 'Hearts on a phone', kind: 'phone' },
     ],
-    world: 'In the house next door: Grandma plays on a laptop at the kitchen table, and Grandpa is in the same game on his phone on the porch swing.',
+    world: 'Grandma plays on a laptop at the kitchen table, and Grandpa is in the same game on his phone on the porch swing.',
   },
 ];
 
