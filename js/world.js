@@ -29,8 +29,8 @@ const RW = 3.6; // asphalt half width
 const SHOULDER = 1.3;
 const roadZ = (x) => 4 * Math.sin((x - 10) / 32);
 const ROAD_X = [-120, 120];
-const BOUNDS = { x0: -62, x1: 62, z0: -62, z1: 52 };
-const WORLD_R = { x: 95, z: 88 }; // the ground fades into the void past this
+const BOUNDS = { x0: -52, x1: 52, z0: -55, z1: 47 };
+const WORLD_R = { x: 78, z: 72 }; // the ground fades into the void past this
 
 // Deterministic randomness so the forest is the same on every visit
 let seed = 20261027;
@@ -598,10 +598,11 @@ function character(name) {
 
 // Pose presets. sit is the seat height; hands are measured from the middle of the body outward.
 const POSES = {
-  phone: (sit) => ({ sit, lean: 0.15, head: 0.45, hands: [[0.07, sit + 0.46, 0.3], [0.07, sit + 0.46, 0.3]], elbows: [0.3, -0.3, -0.1], grip: 0.6 }),
-  desk: (sit, y, z) => ({ sit, lean: 0.25, head: 0.12, hands: [[0.14, y, z], [0.14, y, z]] }),
-  lap: (sit) => ({ sit, head: 0.05, hands: [[0.12, sit + 0.12, 0.3], [0.12, sit + 0.12, 0.3]], grip: 0.2 }),
-  standPhone: { head: 0.4, hands: [[0.07, 1.18, 0.3], [0.07, 1.18, 0.3]], elbows: [0.3, -0.3, -0.1], grip: 0.6 },
+  phone: (sit) => ({ sit, lean: 0.15, head: 0.45, phone: [0, sit + 0.47, 0.3], elbows: [0.3, -0.35, -0.1] }),
+  // Right hand on the mouse, left on the keyboard: y is the desk top, z how far out they reach.
+  desk: (sit, y, z) => ({ sit, lean: 0.25, head: 0.12, hands: [[0.26, y + 0.03, z], [0.08, y + 0.035, z]], along: [0.05, -0.12, 1], grip: 0.25 }),
+  lap: (sit) => ({ sit, head: 0.05, hands: [[0.13, sit + 0.15, 0.3], [0.13, sit + 0.15, 0.3]], along: [0.1, -0.35, 1], grip: 0.3 }),
+  standPhone: { head: 0.4, phone: [0, 1.2, 0.3], elbows: [0.3, -0.35, -0.1] },
 };
 
 // A person, facing +Z, origin on the floor under them. Fills in when the model loads.
@@ -622,11 +623,10 @@ function person(name, pose = {}, { s = 1, colors = {}, phone: phoneShot, project
     });
     const b = posePerson(o, g.animations[0], { ...pose, scale: s });
     // o is still at the origin, so bone world positions are in the holder's own space.
-    const at = (bone) => bone.getWorldPosition(new THREE.Vector3());
     if (phoneShot) {
       const ph = phone(phoneShot);
-      ph.position.copy(at(b.Index2R).add(at(b.Index2L)).multiplyScalar(0.5));
-      ph.lookAt(at(b.Head).add(new THREE.Vector3(0, 0.3, 0.3)));
+      ph.position.copy(b.phone.position);
+      ph.quaternion.copy(b.phone.quaternion);
       ph.scale.setScalar(1 / s);
       holder.add(ph);
     }
@@ -743,6 +743,67 @@ function poster(file, w, h) {
   const f = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, h + 0.04, 0.02), M.black);
   f.position.z = -0.012;
   return group(m, f);
+}
+
+// Older game art hung as a vintage print: yellowed, faded paper on a cream mat in an ornate frame.
+function vintagePoster(file, w, h) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = Math.round((512 * h) / w);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = maxAniso;
+  new THREE.ImageLoader().load(SHOTS + file, (img) => {
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0, c.width, c.height);
+    // Fade toward old newsprint: desaturate, warm, lift the blacks.
+    const d = g.getImageData(0, 0, c.width, c.height), px = d.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const l = 0.3 * px[i] + 0.59 * px[i + 1] + 0.11 * px[i + 2];
+      const r = px[i] * 0.45 + l * 0.55, gg = px[i + 1] * 0.45 + l * 0.55, b = px[i + 2] * 0.45 + l * 0.55;
+      px[i] = 40 + r * 0.8; px[i + 1] = 30 + gg * 0.74; px[i + 2] = 15 + b * 0.6;
+    }
+    g.putImageData(d, 0, 0);
+    const v = g.createRadialGradient(c.width / 2, c.height / 2, c.width * 0.3, c.width / 2, c.height / 2, c.height * 0.62);
+    v.addColorStop(0, 'rgba(120,80,30,0)'); v.addColorStop(1, 'rgba(110,70,25,0.45)');
+    g.fillStyle = v; g.fillRect(0, 0, c.width, c.height);
+    // Foxing spots and an old fold across the middle (Math.random: this runs after the seeded world is built).
+    const rr = (lo, hi) => lo + (hi - lo) * Math.random();
+    for (let i = 0; i < 70; i++) {
+      g.fillStyle = `rgba(${rr(110, 150) | 0},${rr(70, 95) | 0},30,${rr(0.05, 0.18)})`;
+      g.beginPath(); g.arc(rr(0, c.width), rr(0, c.height), rr(1, 6), 0, 7); g.fill();
+    }
+    g.fillStyle = 'rgba(255,245,220,0.18)'; g.fillRect(0, c.height / 2 - 1, c.width, 2);
+    g.fillStyle = 'rgba(60,40,15,0.12)'; g.fillRect(0, c.height / 2 + 1, c.width, 2);
+    t.needsUpdate = true;
+  });
+  const print = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: t, roughness: 0.95 }));
+  print.position.z = 0.012;
+  const matBoard = bx(w + 0.1, h + 0.1, 0.01, mat(0xe9dfc8, { roughness: 1 }), 0, 0, 0.004);
+  const holder = group(print, matBoard);
+  model('fancy_picture_frame_01').then((root) => {
+    if (!root) return;
+    const o = root.clone(true);
+    // Drop the frame's own picture; it's the one mesh that is a single quad.
+    o.traverse((m) => { if (m.isMesh && m.geometry.attributes.position.count <= 4) m.visible = false; });
+    // The frame is landscape (0.6 x 0.46 m): stand it on end and stretch it around the mat.
+    o.rotation.z = Math.PI / 2;
+    o.scale.set((h + 0.2) / 0.6, (w + 0.2) / 0.46, 1.4);
+    o.position.z = -0.006;
+    holder.add(o);
+  });
+  return holder;
+}
+
+// Keyboard at the origin with the mouse dx along X, both resting on y = 0.
+function keyboardAndMouse(dx = -0.34, color = 0x1f2329) {
+  const body = mat(color, { roughness: 0.6 });
+  const keys = new THREE.Group();
+  const keyM = mat(0x3a3f47, { roughness: 0.7 });
+  for (let r = 0; r < 5; r++) keys.add(bx(0.4, 0.008, 0.019, keyM, 0, 0.022, -0.045 + r * 0.023));
+  const mouse = mesh(new THREE.SphereGeometry(1, 16, 10), body, dx, 0.012, 0.02);
+  mouse.scale.set(0.032, 0.02, 0.055);
+  const pad = bx(0.22, 0.003, 0.19, mat(0x2a2d33, { roughness: 1 }), dx, 0.0015, 0.02);
+  return group(bx(0.44, 0.018, 0.14, body, 0, 0.009, 0), keys, pad, mouse);
 }
 
 function floorLamp() {
@@ -1023,7 +1084,7 @@ function clearOf(x, z, r) {
 
 function plantForest() {
   // Fairy rings: old trees surrounded by younger ones, plus solitary giants
-  for (let c = 0; c < 260; c++) {
+  for (let c = 0; c < 150; c++) {
     const x = R(-WORLD_R.x, WORLD_R.x), z = R(-WORLD_R.z - 8, WORLD_R.z - 8);
     const big = rand() < 0.55 ? 0 : 1;
     const s = R(0.85, 1.2);
@@ -1038,7 +1099,7 @@ function plantForest() {
     }
   }
   // Young redwoods filling the gaps and edging the clearings
-  for (let i = 0; i < 320; i++) {
+  for (let i = 0; i < 170; i++) {
     const x = R(-WORLD_R.x, WORLD_R.x), z = R(-WORLD_R.z - 8, WORLD_R.z - 8);
     const s = R(0.6, 1.3);
     if (clearOf(x, z, TREE_KINDS[3].Rb * s)) trees.push({ x, z, kind: 3, s, rot: R(0, 6.28) });
@@ -1101,7 +1162,7 @@ function plantUndergrowth() {
   const fm = new THREE.MeshStandardMaterial({ map: ptex('fern.png'), alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.8, color: 0xc8dcae });
   fm.map.wrapS = fm.map.wrapT = THREE.ClampToEdgeWrapping;
   const spots = [];
-  for (let i = 0; i < 2600 && spots.length < 1100; i++) {
+  for (let i = 0; i < 2000 && spots.length < 760; i++) {
     let x, z;
     if (rand() < 0.55 && trees.length) {
       const t = trees[Math.floor(rand() * trees.length)];
@@ -1226,14 +1287,31 @@ function hydrant(x, z) {
 }
 
 function mailbox(x, z, ry, name) {
+  // A classic rural mailbox: D-shaped steel body, door facing the road (local -Z), flag on the side.
   const p = new Place(x, z, ry);
   p.box(0.09, 1.1, 0.09, 0, 0.55, 0, M.darkWood, { collide: true });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.48, 20, 1, false, 0, Math.PI), mat(0x2b2f33, { metalness: 0.6, roughness: 0.4 }));
-  body.rotation.x = Math.PI / 2; body.rotation.z = Math.PI / 2;
-  body.position.set(0, 1.12, 0);
-  p.group.add(body);
-  p.box(0.26, 0.14, 0.48, 0, 1.06, 0, mat(0x2b2f33, { metalness: 0.6, roughness: 0.4 }));
-  p.box(0.02, 0.15, 0.04, 0.14, 1.25, -0.15, mat(0xc0302a));
+  p.box(0.24, 0.03, 0.4, 0, 1.115, 0, M.darkWood);
+  const steel = mat(0x2b2f33, { metalness: 0.6, roughness: 0.4 });
+  const profile = (r, h) => {
+    const s = new THREE.Shape();
+    s.moveTo(-r, 0); s.lineTo(r, 0); s.lineTo(r, h); s.absarc(0, h, r, 0, Math.PI, false); s.lineTo(-r, 0);
+    return s;
+  };
+  const extrude = (shape, depth, bevel) => new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 24 });
+  const body = new THREE.Mesh(extrude(profile(0.1, 0.1), 0.46, 0.006), steel);
+  body.position.set(0, 1.135, -0.23);
+  const door = new THREE.Mesh(extrude(profile(0.106, 0.1), 0.012, 0.003), mat(0x23272b, { metalness: 0.6, roughness: 0.35 }));
+  door.position.set(0, 1.132, -0.25);
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.005, 8, 16, Math.PI), M.steel);
+  handle.position.set(0, 1.3, -0.27);
+  handle.rotation.x = Math.PI / 2;
+  // Flag down on the right side, on a little pivot.
+  const red = mat(0xc0302a, { roughness: 0.5 });
+  const pivot = mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.012, 12), M.steel, 0.112, 1.2, 0.12);
+  pivot.rotation.z = Math.PI / 2;
+  const arm = bx(0.006, 0.018, 0.2, red, 0.118, 1.2, 0.04);
+  const flag = bx(0.006, 0.06, 0.07, red, 0.118, 1.225, -0.04);
+  for (const m of [body, door, handle, pivot, arm, flag]) { m.castShadow = true; m.receiveShadow = true; p.group.add(m); }
   void name;
 }
 
@@ -1283,7 +1361,7 @@ function busStop(x, z) {
   const Y = 0.12;
   // People waiting. A: on the bench playing Roadway Rivals against the son up at the house.
   const a = person('bus_punk', POSES.phone(0.6), { colors: { Skin: 0xa86b45 }, phone: 'roadway-phone.jpg', project: 'roadway-rivals', shot: 'roadway-phone.jpg' });
-  p.add(a, -1.6, Y - 0.12, -0.9, 0.15);
+  p.add(a, -1.1, Y - 0.12, -0.92, 0.1);
   // B: standing, playing Bridge Defender
   const b = person('bus_suit', POSES.standPhone, { phone: 'bridge-defender-gameplay.jpg', project: 'bridge-defender', shot: 'bridge-defender-gameplay.jpg' });
   p.add(b, 0.9, Y, 0.15, -0.35);
@@ -1294,9 +1372,9 @@ function busStop(x, z) {
   p.collider(2.3, 0.4, 0.25, 0.25, 0, 1.8);
   // D: on the bench, hands in lap
   const d = person('bus_farmer', POSES.lap(0.6));
-  p.add(d, -2.6, Y - 0.12, -0.9, -0.1);
+  p.add(d, -2.0, Y - 0.12, -0.92, -0.05);
 
-  const [ix, iz] = p.world(-1.6, -0.8), [jx, jz] = p.world(0.9, 0.2);
+  const [ix, iz] = p.world(-1.1, -0.8), [jx, jz] = p.world(0.9, 0.2);
   addIcon('roadway-rivals', ix, 3.5, iz);
   addIcon('bridge-defender', jx, 3.5, jz);
 }
@@ -1521,7 +1599,7 @@ function familyHouse(x, z, rot) {
   h.add(lap, -4.3, FL + 0.76, -2.42, 0);
   tag(lap, 'family-card-table', 'fct-desktop.jpg');
   placeModel(h, 'dining_chair_02', -4.3, FL, -1.75, Math.PI, 1.05);
-  const grandma = person('grandma', POSES.desk(0.48, 0.8, 0.52), { colors: { Hair: 0xd1d5db }, project: 'family-card-table', shot: 'fct-desktop.jpg' });
+  const grandma = person('grandma', { ...POSES.desk(0.48), hands: [[0.1, 0.795, 0.5], [0.1, 0.795, 0.5]] }, { colors: { Hair: 0xd1d5db }, project: 'family-card-table', shot: 'fct-desktop.jpg' });
   h.add(grandma, -4.3, FL, -1.75, Math.PI);
   for (const [cx2, cz2, r2] of [[-5.35, -2.7, Math.PI / 2], [-3.25, -2.7, -Math.PI / 2], [-4.3, -3.65, 0]]) placeModel(h, 'dining_chair_02', cx2, FL, cz2, r2, 1.05);
   const vaseB = mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.18, 16), mat(0x5a7f8f, { roughness: 0.2 }), 0, 0.09, 0);
@@ -1569,7 +1647,8 @@ function familyHouse(x, z, rot) {
 
   // ---- Upstairs: the son's room ----
   placeModel(h, 'metal_office_desk', -4.9, UP, Z0 + 0.55, 0, 0.95);
-  placeModel(h, 'gamepad', -4.35, UP + 0.75, Z0 + 0.8, 0.4, 1.0);
+  placeModel(h, 'gamepad', -4.3, UP + 0.75, Z0 + 0.62, 0.4, 1.0);
+  h.add(keyboardAndMouse(-0.34), -5.08, UP + 0.75, Z0 + 0.74, Math.PI);
   h.collider(-4.9, Z0 + 0.5, 1.0, 0.38, UP, UP + 0.8);
   const m1 = monitor(0.6, 0.34, 'roadway-desktop.jpg');
   h.add(m1, -5.35, UP + 0.75, Z0 + 0.4);
@@ -1578,11 +1657,11 @@ function familyHouse(x, z, rot) {
   h.add(m2, -4.3, UP + 0.75, Z0 + 0.4, -0.25);
   tag(m2, 'bridge-defender', 'bridge-defender-gameplay.jpg');
   h.add(officeChair(0xb91c1c), -5.0, UP, Z0 + 1.3, Math.PI);
-  const son = person('son', POSES.desk(0.51, 0.8, 0.45), { s: 0.82, colors: { Purple: 0x2f855a }, project: 'roadway-rivals', shot: 'roadway-desktop.jpg' });
+  const son = person('son', POSES.desk(0.51, 0.76, 0.5), { s: 0.82, colors: { Purple: 0x2f855a }, project: 'roadway-rivals', shot: 'roadway-desktop.jpg' });
   h.add(son, -5.0, UP, Z0 + 1.3, Math.PI);
   h.add(bed(1.0, 2.0, 0x2b6cb0), X0 + 0.6, UP, -2.0);
   h.collider(X0 + 0.6, -2.0, 0.55, 1.03, UP, UP + 0.7);
-  h.add(poster('roadway-title-phone.jpg', 0.45, 0.8), -2.6, UP + 1.6, -0.08, Math.PI);
+  h.add(vintagePoster('roadway-title-phone.jpg', 0.45, 0.8), -2.6, UP + 1.6, -0.08, Math.PI);
   h.add(poster('bridge-defender-title.jpg', 0.5, 0.8), -1.08, UP + 1.6, -3.0, -Math.PI / 2);
   h.add(rug(1.6, 1.2, ['#1f3b57', '#e2b84a', '#0f2236']), -4.0, UP, -2.6);
   const [kx1, kz1] = h.world(-5.6, Z0 + 0.9), [kx2, kz2] = h.world(-4.1, Z0 + 0.9);
@@ -1595,9 +1674,10 @@ function familyHouse(x, z, rot) {
   const m3 = monitor(0.6, 0.34, 'seraph-gameplay.jpg');
   h.add(m3, 5.5, UP + 0.75, Z0 + 0.4);
   placeModel(h, 'desk_lamp_arm_01', 6.1, UP + 0.75, Z0 + 0.35, -0.5, 0.8);
+  h.add(keyboardAndMouse(-0.34, 0xe5e7eb), 5.42, UP + 0.75, Z0 + 0.74, Math.PI);
   tag(m3, 'seraph', 'seraph-gameplay.jpg');
   h.add(officeChair(0x6b46c1), 5.5, UP, Z0 + 1.3, Math.PI);
-  const daughter = person('daughter', POSES.desk(0.51, 0.8, 0.45), { s: 0.9, project: 'seraph', shot: 'seraph-gameplay.jpg' });
+  const daughter = person('daughter', POSES.desk(0.51, 0.76, 0.5), { s: 0.9, project: 'seraph', shot: 'seraph-gameplay.jpg' });
   h.add(daughter, 5.5, UP, Z0 + 1.3, Math.PI);
   h.add(bed(1.0, 2.0, 0xd53f8c), X1 - 0.6, UP, -2.0);
   h.collider(X1 - 0.6, -2.0, 0.55, 1.03, UP, UP + 0.7);
@@ -1678,7 +1758,7 @@ const CLEARINGS = [
   { x: HOUSE.x + 2, z: HOUSE.z + 1, rx: 19, rz: 15 },
   { x: HOUSE.x + 4, z: HOUSE.z + 13, rx: 15, rz: 7 },
   { x: HOUSE2.x + 2, z: HOUSE2.z - 1, rx: 14, rz: 12 },
-  { x: BUS.x, z: BUS.z - 0.5, rx: 6, rz: 3.5 },
+  { x: BUS.x, z: BUS.z - 0.5, rx: 7.5, rz: 4.5 },
   { x: 2, z: roadZ(2), rx: 6, rz: 9 }, // keep the spawn view open
 ];
 
@@ -1752,19 +1832,10 @@ hydrant(BUS.x - 5, roadZ(BUS.x - 5) - RW - SHOULDER - 0.4);
 mailbox(DRIVE_X + 2.2, roadZ(DRIVE_X + 2) - RW - SHOULDER - 0.2, Math.PI, 'family');
 mailbox(HOUSE2.x + 11, roadZ(HOUSE2.x + 11) + RW + SHOULDER + 0.2, 0, 'neighbor');
 
-// Cars: Mom and Dad's in the drive, the neighbor's in theirs
-function car(x, z, ry, paintColor) {
-  const p = new Place(x, z, ry);
-  placeModel(p, 'CarConcept', 0, 0, 0, 0, 0.92, (o) => {
-    if (!paintColor) return;
-    o.traverse((m) => {
-      if (m.isMesh && /Paint/.test(m.material.name)) { m.material = m.material.clone(); m.material.color.set(paintColor); }
-    });
-  });
-  p.collider(0, 0.2, 1.15, 2.1, 0, 1.4);
-}
-car(DRIVE_X - 0.7, -31, 0.03, null);
-car(HOUSE2.x + 9, 27.5, Math.PI, 0x24364a);
+// Dad's old project car, under a tarp in the drive
+const carPlace = new Place(DRIVE_X - 0.7, -31, 0.03);
+placeModel(carPlace, 'covered_car', 0, 0, 0, 0, 1.0);
+carPlace.collider(0, 0, 0.95, 2.2, 0, 1.4);
 
 // ---------------------------------------------------------------------------
 // Player
