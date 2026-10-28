@@ -1243,8 +1243,9 @@ function plantUndergrowth() {
       const a = R(0, 6.28), d = TREE_KINDS[t.kind].Rb * t.s * 1.6 + R(0.8, 6);
       x = t.x + Math.cos(a) * d; z = t.z + Math.sin(a) * d;
     } else [x, z] = inWorld();
-    if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.8) continue;
-    if (onLot(x, z, 1.6)) continue; // fern fronds reach about 1.5 m out
+    // Card ferns reach about 1.6 m out: keep them off the sidewalk, house and bus stop
+    if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 1.7) continue;
+    if (onLot(x, z, 1.7)) continue;
     if (CLEARINGS.some((c) => ((x - c.x) / (c.rx - 2)) ** 2 + ((z - c.z) / (c.rz - 2)) ** 2 < 1)) continue;
     if (PATHS.some((p) => p.pts.some(([px, pz]) => Math.hypot(x - px, z - pz) < p.w + 0.8))) continue;
     if (voidFade(x, z) < 0.1) continue;
@@ -1253,9 +1254,15 @@ function plantUndergrowth() {
   // The ferns nearest the houses and the road are scanned sword ferns; the rest are cards.
   const near = ([x, z]) => Math.min(Math.hypot(x - HOUSE.x, z - HOUSE.z) * 0.8, Math.abs(z - roadZ(x)) * 1.6);
   spots.sort((a, b) => near(a) - near(b));
-  const nReal = LOW ? 120 : 340;
-  scatter('fern_02', spots.slice(0, nReal).map(([x, z]) => spin(x, 0, z, R(2.6, 3.6))));
-  spots.splice(0, nReal);
+  // A scanned clump spreads 1.3 m per unit of scale, so it needs more room than a card.
+  const nReal = LOW ? 120 : 340, real = [];
+  for (let i = 0; i < spots.length && real.length < nReal; i++) {
+    const [x, z] = spots[i], sc = R(1.8, 2.6), r = 1.3 * sc;
+    if (Math.abs(z - roadZ(x)) < RW + SHOULDER + r || onLot(x, z, r)) continue;
+    real.push(spin(x, 0, z, sc));
+    spots.splice(i--, 1);
+  }
+  scatter('fern_02', real);
   // Redwood sorrel carpets around the closer trunks
   const sorrel = [];
   for (const t of trees) {
