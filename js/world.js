@@ -410,6 +410,27 @@ const world = new Place(0, 0, 0);
 
 const gltf = new GLTFLoader();
 gltf.setMeshoptDecoder(MeshoptDecoder);
+
+// Every distinct material setup is its own GPU shader, and on Windows each one can take
+// a few hundred ms to compile, freezing the page. So glTF materials are swapped for a
+// few shared flat-colored MeshStandardMaterials (only color/roughness/... differ, which
+// doesn't need a new shader), and each model's shaders compile in the background
+// (compileAsync) before it is shown.
+const unified = new Map();
+function lowPoly(m) {
+  if (!m.isMeshStandardMaterial) return m;
+  const glassy = m.transmission > 0;
+  const p = {
+    color: m.color.getHex(), emissive: m.emissive.getHex(), emissiveIntensity: m.emissiveIntensity,
+    roughness: +m.roughness.toFixed(2), metalness: +m.metalness.toFixed(2),
+    map: m.alphaTest > 0 || m.transparent ? m.map : null, alphaTest: m.alphaTest,
+    transparent: m.transparent || glassy, opacity: glassy ? 0.45 : m.opacity, side: m.side, flatShading: true,
+  };
+  const key = JSON.stringify({ ...p, map: p.map?.uuid ?? null, name: m.name });
+  if (!unified.has(key)) unified.set(key, new THREE.MeshStandardMaterial({ ...p, name: m.name }));
+  return unified.get(key);
+}
+const prepare = (obj) => renderer.compileAsync(obj, camera, scene).catch(() => {});
 const modelCache = new Map();
 function model(name) {
   if (!modelCache.has(name)) {
@@ -417,22 +438,21 @@ function model(name) {
     const load = (url, ok, fail) => gltf.load(url, ok, undefined, fail);
     modelCache.set(name, new Promise((resolve) => {
       const done = (g) => {
+        // Some sample models ship their own studio lights; a light appearing mid-load
+        // would recompile every shader in the scene, so drop them.
+        const lights = [];
+        g.scene.traverse((o) => { if (o.isLight) lights.push(o); });
+        lights.forEach((l) => l.removeFromParent());
         g.scene.traverse((o) => {
           if (!o.isMesh) return;
           o.castShadow = true;
           o.receiveShadow = true;
           if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
           // Flat-colored low-poly props (tools/slim.mjs) with faceted shading, like the people.
-          for (const m of [o.material].flat()) m.flatShading = true;
-          // Transmission needs an extra render pass; plain transparency looks the same here.
-          const ms = Array.isArray(o.material) ? o.material : [o.material];
-          for (const m of ms) {
-            if (m.transmission > 0) { m.transmission = 0; m.transparent = true; m.opacity = 0.45; }
-            // Compression dropped unused second UV sets; point any map that wanted one at the first.
-            for (const k in m) if (m[k]?.isTexture && m[k].channel > 0 && !o.geometry.attributes['uv' + m[k].channel]) m[k].channel = 0;
-          }
+          o.material = Array.isArray(o.material) ? o.material.map(lowPoly) : lowPoly(o.material);
+          for (const m of [o.material].flat()) if (m.map) m.map.channel = 0;
         });
-        resolve(g.scene);
+        prepare(g.scene).then(() => resolve(g.scene));
       };
       load(MODELS + name + '.glb', done, () => load(MODELS + name + '.gltf.json', done, () => resolve(null)));
     }));
@@ -462,11 +482,14 @@ function scatter(name, mats) {
     const m = new THREE.Matrix4();
     root.traverse((o) => {
       if (!o.isMesh) return;
-      const im = new THREE.InstancedMesh(o.geometry, o.material, mats.length);
+      // Ground cover reads too yellow once flat-colored; pull it toward forest green.
+      const gm = o.material.clone();
+      gm.color.multiply(new THREE.Color(0.75, 0.95, 0.7));
+      const im = new THREE.InstancedMesh(o.geometry, gm, mats.length);
       mats.forEach((w, i) => im.setMatrixAt(i, m.multiplyMatrices(w, o.matrixWorld)));
       im.castShadow = im.receiveShadow = true;
       im.computeBoundingSphere();
-      scene.add(im);
+      prepare(im).then(() => { scene.add(im); refreshShadows(); });
     });
     refreshShadows();
   });
@@ -532,10 +555,6 @@ function monitor(w, h, file, standH = 0.12) {
   base.position.set(0, 0.008, -0.02);
   g.add(bez, scr, neck, base);
   g.userData.screen = scr;
-  // A little light spilling from the screen
-  const glow = new THREE.PointLight(0x9fc4ff, 0.6, 2.2, 2);
-  glow.position.set(0, standH + h / 2, 0.4);
-  g.add(glow);
   return g;
 }
 
@@ -593,9 +612,9 @@ function character(name) {
           if (!o.isMesh) return;
           // Some GPUs skip meshes with no normals at all; cheap to rebuild once here.
           if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
-          for (const m of [o.material].flat()) m.flatShading = true;
+          o.material = lowPoly(o.material);
         });
-        resolve(g);
+        prepare(g.scene).then(() => resolve(g));
       };
       load(PEOPLE + name + '.glb', done, () => load(PEOPLE + name + '.gltf.json', done, () => resolve(null)));
     }));
@@ -762,15 +781,13 @@ function vintagePoster(file, w, h) {
   t.anisotropy = maxAniso;
   new THREE.ImageLoader().load(SHOTS + 'w/' + file.replace(/\.(jpg|png)$/, '.webp'), (img) => {
     const g = c.getContext('2d');
+    // Fade toward old newsprint: desaturate, warm, lift the blacks (a canvas filter,
+    // not a per-pixel loop, so it doesn't stall the page).
+    g.fillStyle = '#28190a'; g.fillRect(0, 0, c.width, c.height);
+    g.filter = 'saturate(45%) sepia(35%) contrast(80%)';
+    g.globalAlpha = 0.85;
     g.drawImage(img, 0, 0, c.width, c.height);
-    // Fade toward old newsprint: desaturate, warm, lift the blacks.
-    const d = g.getImageData(0, 0, c.width, c.height), px = d.data;
-    for (let i = 0; i < px.length; i += 4) {
-      const l = 0.3 * px[i] + 0.59 * px[i + 1] + 0.11 * px[i + 2];
-      const r = px[i] * 0.45 + l * 0.55, gg = px[i + 1] * 0.45 + l * 0.55, b = px[i + 2] * 0.45 + l * 0.55;
-      px[i] = 40 + r * 0.8; px[i + 1] = 30 + gg * 0.74; px[i + 2] = 15 + b * 0.6;
-    }
-    g.putImageData(d, 0, 0);
+    g.filter = 'none'; g.globalAlpha = 1;
     const v = g.createRadialGradient(c.width / 2, c.height / 2, c.width * 0.3, c.width / 2, c.height / 2, c.height * 0.62);
     v.addColorStop(0, 'rgba(120,80,30,0)'); v.addColorStop(1, 'rgba(110,70,25,0.45)');
     g.fillStyle = v; g.fillRect(0, 0, c.width, c.height);
@@ -827,11 +844,8 @@ function tvScreen(w = 1.4) {
 
 function fireplace() {
   const parts = [bx(1.9, 1.2, 0.5, M.stone, 0, 0.6, 0), bx(2.1, 0.08, 0.6, M.darkWood, 0, 1.24, 0.03), bx(1.0, 0.7, 0.05, M.black, 0, 0.45, 0.24)];
-  const fire = new THREE.PointLight(0xff8a3a, 1.2, 4, 2);
-  fire.position.set(0, 0.4, 0.6);
   const glow = mesh(new THREE.PlaneGeometry(0.7, 0.35), mat(0xff7a2a, { emissive: 0xff6a1a, emissiveIntensity: 2 }), 0, 0.3, 0.27);
   const g = group(...parts, glow);
-  g.add(fire);
   return g;
 }
 
@@ -1711,16 +1725,20 @@ function familyHouse(x, z, rot) {
   h.add(vanity(1.2), 5.0, UP, 0.35);
   h.add(toilet(), 3.3, UP, 0.4);
 
-  // Lights inside: warm lamps in each room
-  for (const [lx, ly, lz, i] of [[-4.5, FL + 2.5, 3, 5], [-4.3, FL + 2.5, -2.7, 5], [5.2, FL + 2.5, 2.5, 4], [5.2, FL + 2.5, -3, 3], [0.6, FL + 2.5, 2, 3], [-4.5, UP + 2.4, -3, 4], [5.2, UP + 2.4, -3, 4], [-4.5, UP + 2.4, 3, 3], [0.2, UP + 2.4, 1.5, 3]]) {
-    const l = new THREE.PointLight(0xffd9a8, i, 7.5, 1.6);
-    const [wx, wz] = h.world(lx, lz);
-    l.position.set(wx, ly, wz);
-    scene.add(l);
+  // Lights inside: a warm fixture in each room, but only five real lights. Every light
+  // costs every pixel, and changing how many there are recompiles every shader.
+  const lit = new Set([0, 1, 2, 5, 6]);
+  [[-4.5, FL + 2.5, 3, 5], [-4.3, FL + 2.5, -2.7, 5], [5.2, FL + 2.5, 2.5, 4], [5.2, FL + 2.5, -3, 3], [0.6, FL + 2.5, 2, 3], [-4.5, UP + 2.4, -3, 4], [5.2, UP + 2.4, -3, 4], [-4.5, UP + 2.4, 3, 3], [0.2, UP + 2.4, 1.5, 3]].forEach(([lx, ly, lz, i], k) => {
+    if (lit.has(k)) {
+      const l = new THREE.PointLight(0xffd9a8, i * 1.6, 11, 1.4);
+      const [wx, wz] = h.world(lx, lz);
+      l.position.set(wx, ly, wz);
+      scene.add(l);
+    }
     const fixture = mesh(new THREE.SphereGeometry(0.14, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xfff3dd, { emissive: 0xffe2b0, emissiveIntensity: 1.5 }));
     fixture.rotation.x = Math.PI;
     h.add(fixture, lx, ly + 0.45, lz);
-  }
+  });
   return h;
 }
 
@@ -2079,6 +2097,9 @@ function mergeStatic() {
   }
   for (const o of done) o.removeFromParent();
 }
+// Faceted shading everywhere: matches the low-poly look and lets the built-in surfaces
+// share one shader with the models.
+scene.traverse((o) => { for (const m of [o.material ?? []].flat()) if (m.isMeshStandardMaterial) m.flatShading = true; });
 mergeStatic();
 
 // ---------------------------------------------------------------------------

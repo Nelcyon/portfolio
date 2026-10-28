@@ -65,6 +65,9 @@ for (const file of process.argv.slice(2)) {
       m.setEmissiveFactor([f[0] * avg[0], f[1] * avg[1], f[2] * avg[2]]);
     }
   }
+  // Sample models can carry studio lights (KHR_lights_punctual) and fancy material
+  // extensions; both make extra shaders in the browser, so they go.
+  for (const e of root.listExtensionsUsed()) if (/^KHR_(lights_punctual|materials_)/.test(e.extensionName)) e.dispose();
   // Every other map (normal, roughness, sheen, clearcoat...) goes.
   for (const t of root.listTextures()) if (!keepTex.has(t)) t.dispose();
   // People keep their skins; everything loses normals so shared corners weld together.
