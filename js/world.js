@@ -28,11 +28,13 @@ const LOW = isTouch || /[?&]low\b/.test(location.search); // phones: smaller tex
 const RW = 3.6; // asphalt half width
 const SHOULDER = 1.3;
 const roadZ = (x) => 4 * Math.sin((x - 10) / 32);
-const ROAD_X = [-45, 55];
+const ROAD_X = [-34, 36];
 // A small world: the road, the bus stop, the family's drive and house, ending just behind it.
-const BOUNDS = { x0: -20, x1: 31, z0: -45, z1: 9 };
-const WORLD_C = { x: 6, z: -18 }; // center of the world
-const WORLD_R = { x: 32, z: 31 }; // the ground fades into the void past this
+// A small world: the house sits a few steps off the road with the bus stop beside it,
+// and the forest gives way to the void just behind the house.
+const BOUNDS = { x0: -19, x1: 21, z0: -30, z1: 8 };
+const WORLD_C = { x: 0.5, z: -11 }; // center of the world
+const WORLD_R = { x: 24, z: 22 }; // the ground fades into the void past this
 
 // Deterministic randomness so the forest is the same on every visit
 let seed = 20261027;
@@ -93,7 +95,7 @@ sun.target.position.set(WORLD_C.x, 0, WORLD_C.z);
 sun.position.add(sun.target.position);
 sun.castShadow = true;
 sun.shadow.mapSize.set(LOW ? 1024 : 2048, LOW ? 1024 : 2048);
-Object.assign(sun.shadow.camera, { left: -48, right: 48, top: 48, bottom: -48, near: 10, far: 260 });
+Object.assign(sun.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 10, far: 260 });
 sun.shadow.bias = -0.0003;
 sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
@@ -114,16 +116,52 @@ function skyMaterial() {
       }`,
   });
 }
+let loadPanorama;
 {
   const envScene = new THREE.Scene();
   envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), skyMaterial()));
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(envScene, 0.04).texture;
   pmrem.dispose();
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(280, 32, 16), skyMaterial());
+  // The visible sky starts as the same gradient, then the redwoods panorama fades in
+  // over it once the world is on screen: 70 KB first, and on big screens a 2K copy
+  // after that. Same shader before and after, so nothing recompiles.
+  const skyMat = skyMaterial();
+  skyMat.uniforms.map = { value: null };
+  skyMat.uniforms.k = { value: 0 };
+  skyMat.fragmentShader = `uniform vec3 top, mid, low; uniform sampler2D map; uniform float k; varying vec3 vp;
+    void main(){
+      float h = vp.y;
+      vec3 c = h > 0.12 ? mix(mid, top, smoothstep(0.12, 0.6, h)) : mix(low, mid, smoothstep(-0.05, 0.12, h));
+      // The panorama's trees start just under the horizon (its own forest floor, too close
+      // to read at this size, is left out) and run to straight up, then sink into the void.
+      float v = 0.18 + 0.82 * (asin(clamp(h, -1.0, 1.0)) + 0.06) / 1.6308;
+      vec3 p = texture2D(map, vec2(atan(vp.z, vp.x) * 0.15915494 + 0.5, clamp(v, 0.002, 0.998))).rgb;
+      p = mix(low, p * 0.92, smoothstep(-0.09, -0.01, h));
+      gl_FragColor = vec4(mix(c, p, k), 1.0);
+    }`;
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(280, 32, 16), skyMat);
   sky.renderOrder = -1;
   scene.add(sky);
-  sky.onBeforeRender = () => sky.position.copy(camera.position);
+  let fadeFrom = 0;
+  sky.onBeforeRender = () => {
+    sky.position.copy(camera.position);
+    if (fadeFrom) skyMat.uniforms.k.value = Math.min(1, (performance.now() - fadeFrom) / 900);
+  };
+  const panoLoader = new THREE.TextureLoader(new THREE.LoadingManager());
+  const usePano = (t) => {
+    t.wrapS = THREE.RepeatWrapping;
+    t.generateMipmaps = false; // mip levels would show a seam where the panorama wraps
+    t.minFilter = THREE.LinearFilter;
+    const old = skyMat.uniforms.map.value;
+    skyMat.uniforms.map.value = t;
+    old?.dispose();
+    fadeFrom ||= performance.now();
+  };
+  loadPanorama = () => panoLoader.load(TEX + 'redwoods_sky_m.webp', (t) => {
+    usePano(t);
+    if (!LOW) panoLoader.load(TEX + 'redwoods_sky.webp', usePano);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1082,8 +1120,11 @@ const TREE_KINDS = [
 ];
 
 const trees = []; // { x, z, kind, s, rot }
+// The house with its porch, ramp and parking pad: nothing grows there
+const onLot = (x, z, m = 0) => x > HOUSE.x - 9 - m && x < HOUSE.x + 19 + m && z > HOUSE.z - 7 - m && z < HOUSE.z + 10 + m;
 function clearOf(x, z, r) {
   if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 1.2 + r) return false;
+  if (onLot(x, z, r + 1)) return false;
   for (const c of CLEARINGS) {
     const dx = (x - c.x) / (c.rx + r), dz = (z - c.z) / (c.rz + r);
     if (dx * dx + dz * dz < 1) return false;
@@ -1108,7 +1149,7 @@ const inWorld = () => [WORLD_C.x + R(-WORLD_R.x, WORLD_R.x), WORLD_C.z + R(-WORL
 
 function plantForest() {
   // Fairy rings: old trees surrounded by younger ones, plus solitary giants
-  for (let c = 0; c < 45; c++) {
+  for (let c = 0; c < 120; c++) {
     const [x, z] = inWorld();
     const big = rand() < 0.55 ? 0 : 1;
     const s = R(0.85, 1.2);
@@ -1123,7 +1164,7 @@ function plantForest() {
     }
   }
   // Young redwoods filling the gaps and edging the clearings
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 160; i++) {
     const [x, z] = inWorld();
     const s = R(0.6, 1.3);
     if (clearOf(x, z, TREE_KINDS[3].Rb * s)) trees.push({ x, z, kind: 3, s, rot: R(0, 6.28) });
@@ -1194,6 +1235,7 @@ function plantUndergrowth() {
       x = t.x + Math.cos(a) * d; z = t.z + Math.sin(a) * d;
     } else [x, z] = inWorld();
     if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.8) continue;
+    if (onLot(x, z, 0.5)) continue;
     if (CLEARINGS.some((c) => ((x - c.x) / (c.rx - 2)) ** 2 + ((z - c.z) / (c.rz - 2)) ** 2 < 1)) continue;
     if (PATHS.some((p) => p.pts.some(([px, pz]) => Math.hypot(x - px, z - pz) < p.w + 0.8))) continue;
     if (voidFade(x, z) < 0.1) continue;
@@ -1214,7 +1256,7 @@ function plantUndergrowth() {
     for (let k = 0; k < 6; k++) {
       const a = R(0, 6.28), d = r0 + R(0.2, 3);
       const x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
-      if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.5) continue;
+      if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.5 || onLot(x, z)) continue;
       sorrel.push(spin(x, 0, z, R(2.2, 3.2)));
     }
   }
@@ -1453,7 +1495,7 @@ function familyHouse(x, z, rot) {
   // Foundation (stone), ground floor slab, upper floor slab with a stairwell, ceiling
   h.box(X1 - X0 + 0.3, FL, Z1 - Z0 + 0.3, 0, FL / 2, 0, M.stone, { shadow: false });
   h.floor(0, 0, (X1 - X0) / 2, (Z1 - Z0) / 2, FL);
-  const sx0 = 1.35, sx1 = 2.4, sTop = -0.5, sBot = 4.5; // stairs, rising toward the back
+  const sx0 = 1.2, sx1 = 2.4, sTop = -0.6, sBot = 4.4; // stairs, rising toward the back
   const upperSlab = (x0, x1, z0, z1, top) => h.slab(x0, x1, z0, z1, UP, 0.25, top);
   // Floors: ground (per room), upper (per room, with the stairwell left open)
   const gFloor = (x0, x1, z0, z1, m) => h.box(x1 - x0, 0.02, z1 - z0, (x0 + x1) / 2, FL + 0.01, (z0 + z1) / 2, m, { shadow: false });
@@ -1494,7 +1536,7 @@ function familyHouse(x, z, rot) {
   const iw = (xa, za, xb, zb, lvl, openings, color = 0xf1ede4) => h.wall(xa, za, xb, zb, FL + lvl * LEVEL, LEVEL - 0.01, paint(color), openings, { t: IT });
   iw(X0, 0, -1, 0, 0, [{ a0: 2.2, a1: 5.4, y0: 0, y1: 2.4 }]); // living | kitchen, wide opening
   iw(-1, Z0, -1, Z1, 0, [door(2.6, 3.7), { a0: 7, a1: 10, y0: 0, y1: 2.4 }]); // kitchen/living | hall
-  iw(2.5, Z0, 2.5, Z1, 0, [door(3.8, 5.0), door(6.7, 7.9)]); // hall | grandparents/den
+  iw(2.5, Z0, 2.5, Z1, 0, [door(3.8, 5.0), door(10.6, 11.7)]); // hall | grandparents/den (den door past the foot of the stairs)
   iw(2.5, 0, X1, 0, 0, []); // grandparents | den
   iw(-1, -3.5, 2.5, -3.5, 0, [door(0.4, 1.3)]); // bathroom
   // Upstairs
@@ -1503,17 +1545,27 @@ function familyHouse(x, z, rot) {
   iw(X0, 0, -1, 0, 1, []);
   iw(2.5, 0, X1, 0, 1, []);
 
-  // Stairs
-  const steps = 16, run = (sBot - sTop) / steps, rise = LEVEL / steps;
+  // Stairs: open on the hall side with a handrail, so they read as stairs from the
+  // front door. 18 risers of 17 cm and 28 cm treads, like a real house.
+  const steps = 18, run = (sBot - sTop) / steps, rise = LEVEL / steps;
   for (let i = 0; i < steps; i++) {
     const top = FL + (i + 1) * rise;
     h.box(sx1 - sx0, top, run, (sx0 + sx1) / 2, top / 2, sBot - (i + 0.5) * run, [M.darkWood, M.darkWood, M.planks, M.darkWood, paint(0xf1ede4), M.darkWood], { shadow: false });
   }
   h.floor((sx0 + sx1) / 2, (sTop + sBot) / 2, (sx1 - sx0) / 2, (sBot - sTop) / 2, (lx, lz) => FL + THREE.MathUtils.clamp(0.5 - lz / (sBot - sTop), 0, 1) * LEVEL);
+  // Side rail: keeps the visitor on the treads and off the hall floor below
   h.collider(sx0 - 0.04, (sTop + sBot - 0.4) / 2, 0.04, (sBot - sTop - 0.4) / 2, 0, UP - 0.3);
-  h.box(0.06, LEVEL - 0.25, sBot - sTop - 0.4, sx0 - 0.04, FL + (LEVEL - 0.25) / 2, (sTop + sBot - 0.4) / 2, paint(0xf1ede4), { shadow: false });
-  // Railings around the stairwell upstairs, and a handrail on the stairs
   const rail = M.darkWood, baluster = M.trim;
+  const slope = Math.atan2(LEVEL, sBot - sTop);
+  const hand = h.box(0.06, 0.06, Math.hypot(LEVEL, sBot - sTop), 0, 0, 0, rail, { localUV: true });
+  hand.rotation.x = slope;
+  hand.position.set(sx0 - 0.03, FL + LEVEL / 2 + 0.9, (sTop + sBot) / 2);
+  for (let i = 1; i < steps; i += 2) {
+    const top = FL + (i + 1) * rise;
+    h.box(0.03, 0.88, 0.03, sx0 - 0.03, top + 0.44, sBot - (i + 0.5) * run, baluster, { shadow: false });
+  }
+  h.box(0.1, 1.05, 0.1, sx0 - 0.03, FL + 0.52, sBot - 0.1, rail); // newel post
+  // Railings around the stairwell upstairs
   h.box(0.06, 0.06, sBot - sTop, sx0 - 0.03, UP + 0.95, (sTop + sBot) / 2, rail);
   h.box(sx1 - sx0, 0.06, 0.06, (sx0 + sx1) / 2, UP + 0.95, sBot + 0.03, rail);
   h.collider(sx0 - 0.03, (sTop + sBot) / 2, 0.05, (sBot - sTop) / 2, UP, UP + 1);
@@ -1648,10 +1700,11 @@ function familyHouse(x, z, rot) {
   const [btx, btz] = h.world(X1 - 1.3, 1.1), [rcx, rcz] = h.world(X1 - 1.3, 3.9);
   addIcon('bettertalk', btx, FL + 2.4, btz);
   addIcon('rubecube', rcx, FL + 1.9, rcz);
-  placeModel(h, 'SheenWoodLeatherSofa', 4.6, FL, Z1 - 0.55, Math.PI, 1.0);
-  h.collider(4.6, Z1 - 0.55, 1.35, 0.45, FL, FL + 0.9);
-  h.add(bookshelf(1.2, 2.0), 3.4, FL, 0.25, 0);
-  h.collider(3.4, 0.25, 0.6, 0.2, FL, FL + 2);
+  // Sofa on the back wall and books on the hall wall, clear of the door by the stairs
+  placeModel(h, 'SheenWoodLeatherSofa', 5.0, FL, 0.55, 0, 1.0);
+  h.collider(5.0, 0.55, 1.35, 0.45, FL, FL + 0.9);
+  h.add(bookshelf(1.2, 2.0), 2.75, FL, 2.4, Math.PI / 2);
+  h.collider(2.75, 2.4, 0.2, 0.6, FL, FL + 2);
   plant(h, X1 - 0.5, FL, Z1 - 0.5, 1.0);
   h.add(rug(2.2, 1.6, ['#3b4a5a', '#c8b48a', '#1f2a36']), 5.4, FL, 2.5);
 
@@ -1745,18 +1798,19 @@ function familyHouse(x, z, rot) {
 // ---------------------------------------------------------------------------
 // Build the world
 
-const HOUSE = { x: -4, z: -36 }; // family house, front facing the road (south)
-const DRIVE_X = 13;
-const BUS = { x: 24, z: roadZ(24) - RW - SHOULDER - 2.2 };
+const HOUSE = { x: 0, z: -20 }; // family house, front facing the road (south), porch steps 5 m from it
+const DRIVE_X = HOUSE.x + 17;
+const BUS = { x: -13.5, z: roadZ(-13.5) - RW - SHOULDER - 2.2 }; // just west of the front yard
 
-const frontWalk = polyline([[HOUSE.x + 0.25, HOUSE.z + 6 + 3.5], [HOUSE.x + 0.25, HOUSE.z + 16], [HOUSE.x - 1, roadZ(HOUSE.x) - RW]]);
-const drive = polyline([[DRIVE_X, roadZ(DRIVE_X) - RW + 0.2], [DRIVE_X - 0.5, -18], [DRIVE_X - 1.5, -26], [DRIVE_X - 1.5, -33]]);
-const PATHS = [{ pts: frontWalk, w: 0.8 }, { pts: drive, w: 1.8 }];
+const frontWalk = polyline([[HOUSE.x + 0.25, HOUSE.z + 9.5], [HOUSE.x + 0.25, HOUSE.z + 11.5], [HOUSE.x - 0.5, roadZ(HOUSE.x) - RW]]);
+const busWalk = polyline([[HOUSE.x + 0.25, HOUSE.z + 11.5], [BUS.x + 3.6, BUS.z + 0.2]]);
+const drive = polyline([[DRIVE_X, roadZ(DRIVE_X) - RW + 0.2], [DRIVE_X - 1.5, HOUSE.z + 10], [DRIVE_X - 1.5, HOUSE.z + 3]]);
+const PATHS = [{ pts: frontWalk, w: 0.8 }, { pts: busWalk, w: 0.6 }, { pts: drive, w: 1.8 }];
 const CLEARINGS = [
-  { x: HOUSE.x + 2, z: HOUSE.z + 1, rx: 19, rz: 15 },
-  { x: HOUSE.x + 4, z: HOUSE.z + 13, rx: 15, rz: 7 },
-  { x: BUS.x, z: BUS.z - 0.5, rx: 7.5, rz: 4.5 },
-  { x: 2, z: roadZ(2), rx: 6, rz: 9 }, // keep the spawn view open
+  { x: HOUSE.x + 3, z: HOUSE.z, rx: 15, rz: 8 },
+  { x: HOUSE.x + 2, z: HOUSE.z + 11, rx: 14, rz: 5 },
+  { x: BUS.x, z: BUS.z - 0.5, rx: 6, rz: 4 },
+  { x: 4, z: roadZ(4), rx: 5, rz: 6 }, // keep the spawn view open
 ];
 
 buildGround();
@@ -1790,15 +1844,16 @@ function lawn(cx, cz, rx, rz) {
   msh.renderOrder = 1;
   scene.add(msh);
 }
-lawn(HOUSE.x + 1, HOUSE.z + 13, 15, 7);
-lawn(HOUSE.x - 2, HOUSE.z - 9, 11, 5);
+lawn(HOUSE.x + 2, HOUSE.z + 11, 12, 4.5);
+lawn(HOUSE.x - 2, HOUSE.z - 8, 9, 2.5);
 const gravelPath = M.gravel.clone(); gravelPath.color.set(0xc2b8a8);
 ribbon(frontWalk, -0.75, 0.75, 0.014, M.concrete, [2.5, 2.5]);
+ribbon(busWalk, -0.6, 0.6, 0.0142, gravelPath, [2, 2]);
 ribbon(drive, -1.7, 1.7, 0.013, gravelPath, [2, 2]);
 // Parking pad by Dad's ramp
-ribbon(polyline([[DRIVE_X - 1.5, -26], [DRIVE_X - 1.5, -34]]), -2.8, 2.8, 0.0135, gravelPath, [2, 2]);
+ribbon(polyline([[DRIVE_X - 1.5, HOUSE.z + 10], [DRIVE_X - 1.5, HOUSE.z + 2]]), -2.8, 2.8, 0.0135, gravelPath, [2, 2]);
 
-const LOGS = [[-20, -12, 0.4, 16, 0.9], [36, -20, -1.1, 22, 1.2], [-34, 22, 2.2, 14, 0.8], [8, 22, 0.9, 12, 0.7]];
+const LOGS = [[-15, -22, 0.4, 8, 0.8], [12, 8, 0.3, 10, 0.9], [-9, 7, 2.2, 8, 0.7]];
 for (const [lx, lz, lr, len, r] of LOGS) {
   const dx = (Math.cos(lr) * len) / 2, dz = (-Math.sin(lr) * len) / 2;
   PATHS.push({ pts: [[lx - dx, lz - dz], [lx + dx, lz + dz]], w: r });
@@ -1806,7 +1861,7 @@ for (const [lx, lz, lr, len, r] of LOGS) {
 plantForest();
 plantUndergrowth();
 for (const l of LOGS) fallenLog(...l);
-for (const [sx, sz, sr] of [[-14, -22, 1.6], [26, -14, 2.0], [-28, 8, 1.4], [16, 14, 1.2], [-46, -30, 2.2]]) if (clearOf(sx, sz, sr)) stump(sx, sz, sr);
+for (const [sx, sz, sr] of [[-12, -17, 1.4], [19, -12, 1.6], [-3, 8, 1.2], [9, -28, 1.8]]) if (clearOf(sx, sz, sr)) stump(sx, sz, sr);
 // Mossy boulders and an old stump or two
 for (let i = 0, n = 0; i < 400 && n < 9; i++) {
   const [x, z] = inWorld();
@@ -1819,18 +1874,18 @@ lightShafts();
 
 const family = familyHouse(HOUSE.x, HOUSE.z, 0);
 busStop(BUS.x, BUS.z);
-hydrant(BUS.x - 5, roadZ(BUS.x - 5) - RW - SHOULDER - 0.4);
+hydrant(BUS.x + 7, roadZ(BUS.x + 7) - RW - SHOULDER - 0.4);
 mailbox(DRIVE_X + 2.2, roadZ(DRIVE_X + 2) - RW - SHOULDER - 0.2, Math.PI, 'family');
 
 // Dad's old project car, under a tarp in the drive
-const carPlace = new Place(DRIVE_X - 0.7, -31, 0.03);
+const carPlace = new Place(DRIVE_X - 0.7, HOUSE.z + 5, 0.03);
 placeModel(carPlace, 'covered_car', 0, 0, 0, 0, 1.0);
 carPlace.collider(0, 0, 0.95, 2.2, 0, 1.4);
 
 // ---------------------------------------------------------------------------
 // Player
 
-const player = { pos: new THREE.Vector3(2, 0, roadZ(2)), y: 0, yaw: 0, pitch: 0.02, vy: 0 };
+const player = { pos: new THREE.Vector3(4, 0, roadZ(4)), y: 0, yaw: 0, pitch: 0.02, vy: 0 };
 const keys = new Set();
 const joy = { x: 0, y: 0 };
 
@@ -1842,7 +1897,7 @@ function viewFrom(place, from, at, lift = 0) {
   return { x, z, y: lift, yaw: Math.atan2(-(ax - x), -(az - z)), pitch: Math.atan2(dy, Math.hypot(ax - x, az - z)) };
 }
 const SPOTS = {
-  start: { x: 2, z: roadZ(2) + 1.5, y: 0, yaw: 0.12, pitch: 0.04 },
+  start: { x: 4, z: roadZ(4) + 1.5, y: 0, yaw: 0.3, pitch: 0.04 },
   bettertalk: viewFrom(family, [5.0, 1.6], [7.6, FL + 1.1, 2.5], FL),
   rubecube: viewFrom(family, [5.0, 1.6], [7.6, FL + 1.1, 2.5], FL),
   'roadway-rivals': viewFrom(family, [-4.9, -1.8], [-5.35, UP + 1.0, -5.6], UP),
@@ -2169,7 +2224,11 @@ function loop() {
 // Compile the shaders in the background (parallel where the browser can) so the
 // page stays responsive, then start drawing.
 const timing = { built: Math.round(performance.now()) };
-renderer.compileAsync(scene, camera).catch(() => {}).then(() => renderer.setAnimationLoop(loop));
+renderer.compileAsync(scene, camera).catch(() => {}).then(() => {
+  renderer.setAnimationLoop(loop);
+  // The panorama waits until the first frame is up
+  requestAnimationFrame(() => setTimeout(loadPanorama, 0));
+});
 
 // For testing in a headless browser
-window.__world = { timing, player, goTo, SPOTS, start, scene, THREE, renderer, camera, colliders, trees, pick, update };
+window.__world = { timing, player, keys, goTo, SPOTS, start, scene, THREE, renderer, camera, colliders, trees, pick, update };
