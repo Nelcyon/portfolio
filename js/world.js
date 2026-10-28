@@ -519,6 +519,10 @@ function scatter(name, mats) {
   model(name).then((root) => {
     if (!root) return;
     root.updateMatrixWorld(true);
+    // Center the model on its spot: some packs put the plant off its origin, which
+    // would grow it a few meters from where it was planted (under floors, say).
+    const c = new THREE.Box3().setFromObject(root).getCenter(new THREE.Vector3());
+    const shift = new THREE.Matrix4().makeTranslation(-c.x, 0, -c.z);
     const m = new THREE.Matrix4();
     root.traverse((o) => {
       if (!o.isMesh) return;
@@ -526,7 +530,7 @@ function scatter(name, mats) {
       const gm = o.material.clone();
       gm.color.multiply(new THREE.Color(0.75, 0.95, 0.7));
       const im = new THREE.InstancedMesh(o.geometry, gm, mats.length);
-      mats.forEach((w, i) => im.setMatrixAt(i, m.multiplyMatrices(w, o.matrixWorld)));
+      mats.forEach((w, i) => im.setMatrixAt(i, m.multiplyMatrices(w, shift).multiply(o.matrixWorld)));
       im.castShadow = im.receiveShadow = true;
       im.computeBoundingSphere();
       prepare(im).then(() => { scene.add(im); refreshShadows(); });
@@ -1122,8 +1126,11 @@ const TREE_KINDS = [
 ];
 
 const trees = []; // { x, z, kind, s, rot }
-// The house with its porch, ramp and parking pad: nothing grows there
-const onLot = (x, z, m = 0) => x > HOUSE.x - 19 - m && x < HOUSE.x + 9 + m && z > HOUSE.z - 7 - m && z < HOUSE.z + 10 + m;
+// The house with its porch, ramp and parking pad, and the bus stop with its sign:
+// nothing grows there
+const onLot = (x, z, m = 0) =>
+  (x > HOUSE.x - 19 - m && x < HOUSE.x + 9 + m && z > HOUSE.z - 7 - m && z < HOUSE.z + 10 + m) ||
+  (x > BUS.x - 4.2 - m && x < BUS.x + 5 + m && z > BUS.z - 2.2 - m && z < BUS.z + 2.3 + m);
 function clearOf(x, z, r) {
   if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 1.2 + r) return false;
   if (onLot(x, z, r + 1)) return false;
@@ -1236,8 +1243,9 @@ function plantUndergrowth() {
       const a = R(0, 6.28), d = TREE_KINDS[t.kind].Rb * t.s * 1.6 + R(0.8, 6);
       x = t.x + Math.cos(a) * d; z = t.z + Math.sin(a) * d;
     } else [x, z] = inWorld();
-    if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.8) continue;
-    if (onLot(x, z, 0.5)) continue;
+    // Card ferns reach about 1.6 m out: keep them off the sidewalk, house and bus stop
+    if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 1.7) continue;
+    if (onLot(x, z, 1.7)) continue;
     if (CLEARINGS.some((c) => ((x - c.x) / (c.rx - 2)) ** 2 + ((z - c.z) / (c.rz - 2)) ** 2 < 1)) continue;
     if (PATHS.some((p) => p.pts.some(([px, pz]) => Math.hypot(x - px, z - pz) < p.w + 0.8))) continue;
     if (voidFade(x, z) < 0.1) continue;
@@ -1246,9 +1254,15 @@ function plantUndergrowth() {
   // The ferns nearest the houses and the road are scanned sword ferns; the rest are cards.
   const near = ([x, z]) => Math.min(Math.hypot(x - HOUSE.x, z - HOUSE.z) * 0.8, Math.abs(z - roadZ(x)) * 1.6);
   spots.sort((a, b) => near(a) - near(b));
-  const nReal = LOW ? 120 : 340;
-  scatter('fern_02', spots.slice(0, nReal).map(([x, z]) => spin(x, 0, z, R(2.6, 3.6))));
-  spots.splice(0, nReal);
+  // A scanned clump spreads 1.3 m per unit of scale, so it needs more room than a card.
+  const nReal = LOW ? 120 : 340, real = [];
+  for (let i = 0; i < spots.length && real.length < nReal; i++) {
+    const [x, z] = spots[i], sc = R(1.8, 2.6), r = 1.3 * sc;
+    if (Math.abs(z - roadZ(x)) < RW + SHOULDER + r || onLot(x, z, r)) continue;
+    real.push(spin(x, 0, z, sc));
+    spots.splice(i--, 1);
+  }
+  scatter('fern_02', real);
   // Redwood sorrel carpets around the closer trunks
   const sorrel = [];
   for (const t of trees) {
@@ -1258,7 +1272,7 @@ function plantUndergrowth() {
     for (let k = 0; k < 6; k++) {
       const a = R(0, 6.28), d = r0 + R(0.2, 3);
       const x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
-      if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.5 || onLot(x, z)) continue;
+      if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 0.5 || onLot(x, z, 1)) continue;
       sorrel.push(spin(x, 0, z, R(2.2, 3.2)));
     }
   }
@@ -1838,7 +1852,7 @@ function familyHouse(x, z, rot) {
 const HOUSE = { x: 0, z: -20 }; // family house, front facing the road (south), porch steps 5 m from it
 const DRIVE_X = HOUSE.x - 17; // drive on the west side, up to Dad's ramp
 // Bus stop east of the front walk, its slab right on the road shoulder and square to the road
-const BUS_X = HOUSE.x + 9, BUS_ROT = -Math.atan((4 / 32) * Math.cos((BUS_X - 10) / 32));
+const BUS_X = HOUSE.x + 13, BUS_ROT = -Math.atan((4 / 32) * Math.cos((BUS_X - 10) / 32));
 const BUS = { x: BUS_X, z: roadZ(BUS_X) - RW - SHOULDER - 1.7 / Math.cos(BUS_ROT) };
 
 const frontWalk = polyline([[HOUSE.x + 0.25, HOUSE.z + 9.5], [HOUSE.x + 0.25, HOUSE.z + 11.5], [HOUSE.x - 0.5, roadZ(HOUSE.x) - RW]]);
