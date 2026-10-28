@@ -28,13 +28,15 @@ const LOW = isTouch || /[?&]low\b/.test(location.search); // phones: smaller tex
 const RW = 3.6; // asphalt half width
 const SHOULDER = 1.3;
 const roadZ = (x) => 4 * Math.sin((x - 10) / 32);
-const ROAD_X = [-34, 36];
 // A small world: the road, the bus stop, the family's drive and house, ending just behind it.
 // A small world: the house sits a few steps off the road with the bus stop beside it,
-// and the forest gives way to the void just behind the house.
-const BOUNDS = { x0: -19, x1: 21, z0: -30, z1: 8 };
+// all inside a ring of painted forest that stands just behind the house.
 const WORLD_C = { x: 0.5, z: -11 }; // center of the world
 const WORLD_R = { x: 24, z: 22 }; // the ground fades into the void past this
+const WALL = 0.94; // the forest wall, as a fraction of WORLD_R
+const ellipseD = (x, z) => Math.hypot((x - WORLD_C.x) / WORLD_R.x, (z - WORLD_C.z) / WORLD_R.z);
+// The road runs from wall to wall, and its ends tuck in behind it
+const ROAD_X = [-1, 1].map((dir) => { let x = WORLD_C.x; while (ellipseD(x, roadZ(x)) < WALL + 0.03) x += dir * 0.5; return x; });
 
 // Deterministic randomness so the forest is the same on every visit
 let seed = 20261027;
@@ -123,9 +125,9 @@ let loadPanorama;
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(envScene, 0.04).texture;
   pmrem.dispose();
-  // The visible sky starts as the same gradient, then the redwoods panorama fades in
-  // over it once the world is on screen: 70 KB first, and on big screens a 2K copy
-  // after that. Same shader before and after, so nothing recompiles.
+  // The visible sky starts as the same gradient, then the redwoods panorama (70 KB)
+  // fades in over it once the world is on screen. Same shader before and after, so
+  // nothing recompiles. Only its top shows above the forest wall.
   const skyMat = skyMaterial();
   skyMat.uniforms.map = { value: null };
   skyMat.uniforms.k = { value: 0 };
@@ -158,10 +160,10 @@ let loadPanorama;
     old?.dispose();
     fadeFrom ||= performance.now();
   };
-  loadPanorama = () => panoLoader.load(TEX + 'redwoods_sky_m.webp', (t) => {
-    usePano(t);
-    if (!LOW) panoLoader.load(TEX + 'redwoods_sky.webp', usePano);
-  });
+  loadPanorama = () => {
+    panoLoader.load(TEX + 'redwoods_sky_m.webp', usePano);
+    loadForestWall();
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -981,8 +983,8 @@ function ribbon(pts, o0, o1, y, material, uvScale = [4, 4], fade = true) {
 
 // 1 inside the world, falling to 0 at its ragged edge
 function voidFade(x, z) {
-  const d = Math.hypot((x - WORLD_C.x) / WORLD_R.x, (z - WORLD_C.z) / WORLD_R.z) + (noise2(x * 0.05, z * 0.05) - 0.5) * 0.12;
-  return THREE.MathUtils.clamp((1 - d) / 0.22, 0, 1);
+  const d = ellipseD(x, z) + (noise2(x * 0.05, z * 0.05) - 0.5) * 0.06;
+  return THREE.MathUtils.clamp((1 - d) / 0.1, 0, 1);
 }
 
 const roadPts = [];
@@ -1121,7 +1123,7 @@ const TREE_KINDS = [
 
 const trees = []; // { x, z, kind, s, rot }
 // The house with its porch, ramp and parking pad: nothing grows there
-const onLot = (x, z, m = 0) => x > HOUSE.x - 9 - m && x < HOUSE.x + 19 + m && z > HOUSE.z - 7 - m && z < HOUSE.z + 10 + m;
+const onLot = (x, z, m = 0) => x > HOUSE.x - 19 - m && x < HOUSE.x + 9 + m && z > HOUSE.z - 7 - m && z < HOUSE.z + 10 + m;
 function clearOf(x, z, r) {
   if (Math.abs(z - roadZ(x)) < RW + SHOULDER + 1.2 + r) return false;
   if (onLot(x, z, r + 1)) return false;
@@ -1343,6 +1345,40 @@ function lightShafts() {
   }
 }
 
+// The edge of the world: a ring wall painted with the redwoods panorama, its top cut
+// along a line of treetops so the sky shows between them. The picture streams in
+// after the first frame; until then the wall is see-through (its placeholder is a
+// clear pixel), and the same texture object is reused, so nothing recompiles.
+const wallTex = new THREE.Texture(Object.assign(document.createElement('canvas'), { width: 1, height: 1 }));
+wallTex.colorSpace = THREE.SRGBColorSpace;
+wallTex.wrapS = THREE.RepeatWrapping;
+wallTex.anisotropy = maxAniso;
+wallTex.needsUpdate = true;
+function forestWall() {
+  const seg = 160, H = 30, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= seg; i++) {
+    const a = (i / seg) * Math.PI * 2;
+    const x = WORLD_C.x + Math.cos(a) * WORLD_R.x * WALL, z = WORLD_C.z + Math.sin(a) * WORLD_R.z * WALL;
+    pos.push(x, -0.3, z, x, H, z);
+    uv.push(1 - i / seg, 0, 1 - i / seg, 1);
+    if (i < seg) idx.push(2 * i, 2 * i + 2, 2 * i + 1, 2 * i + 1, 2 * i + 2, 2 * i + 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: wallTex, alphaTest: 0.5, side: THREE.DoubleSide }));
+  m.frustumCulled = false;
+  scene.add(m);
+}
+function loadForestWall() {
+  new THREE.ImageLoader().load(TEX + (LOW ? 'redwoods_wall_m.webp' : 'redwoods_wall.webp'), (img) => {
+    wallTex.dispose(); // the GPU copy is sized for the placeholder; make a new one
+    wallTex.image = img;
+    wallTex.needsUpdate = true;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Street furniture
 
@@ -1381,9 +1417,9 @@ function mailbox(x, z, ry, name) {
   void name;
 }
 
-function busStop(x, z) {
+function busStop(x, z, rot = 0) {
   // Shelter facing south toward the road
-  const p = new Place(x, z);
+  const p = new Place(x, z, rot);
   const frame = mat(0x2f3338, { metalness: 0.6, roughness: 0.4 });
   p.slab(-3.6, 3.6, -1.6, 1.7, 0.12, 0.3, M.concrete);
   for (const fx of [-3, 3]) for (const fz of [-1.1, 1.0]) p.box(0.1, 2.6, 0.1, fx, 1.42, fz, frame, { collide: true });
@@ -1409,7 +1445,7 @@ function busStop(x, z) {
   // Route map on the east end
   p.box(0.08, 1.3, 1.0, 3.06, 1.47, -0.4, mat(0x1d4ed8, { emissive: 0x0b2a80, emissiveIntensity: 0.3 }));
   // Bus stop sign by the road
-  const sp = new Place(x + 4.3, z + 1.4);
+  const sp = new Place(...p.world(4.3, 1.4), rot);
   sp.box(0.07, 2.8, 0.07, 0, 1.4, 0, frame, { collide: true });
   const sign = document.createElement('canvas');
   sign.width = 256; sign.height = 320;
@@ -1578,19 +1614,20 @@ function familyHouse(x, z, rot) {
   const doorX = 0.25;
   h.slab(doorX - 1.2, doorX + 1.2, PZ1, PZ1 + 0.45, 0.3, 0.3, M.deck, M.stone);
   h.slab(doorX - 1.2, doorX + 1.2, PZ1 + 0.45, PZ1 + 0.9, 0.15, 0.15, M.deck, M.stone);
-  const rampL = 5.4, rz0 = Z1 + 0.6, rz1 = Z1 + 1.9;
+  // The ramp leaves the west end of the porch, toward the drive
+  const rampL = 5.4, rz0 = Z1 + 0.6, rz1 = Z1 + 1.9, RE = PX0, rs = -1;
   const rampGeo = new THREE.BoxGeometry(rampL, 0.1, rz1 - rz0);
   planarUV(rampGeo, 0, 0, 0, M.deck);
   const ramp = new THREE.Mesh(rampGeo, M.deck);
-  ramp.position.set(PX1 + rampL / 2, FL / 2 - 0.02, (rz0 + rz1) / 2);
-  ramp.rotation.z = -Math.atan2(FL, rampL);
+  ramp.position.set(RE + (rs * rampL) / 2, FL / 2 - 0.02, (rz0 + rz1) / 2);
+  ramp.rotation.z = -rs * Math.atan2(FL, rampL);
   ramp.receiveShadow = ramp.castShadow = true;
   h.group.add(ramp);
-  h.floor(PX1 + rampL / 2, (rz0 + rz1) / 2, rampL / 2, (rz1 - rz0) / 2, (lx) => FL * (0.5 - lx / rampL));
+  h.floor(RE + (rs * rampL) / 2, (rz0 + rz1) / 2, rampL / 2, (rz1 - rz0) / 2, (lx) => FL * (0.5 - (rs * lx) / rampL));
   for (const rz of [rz0 - 0.03, rz1 + 0.03]) {
-    h.box(rampL, 0.05, 0.05, PX1 + rampL / 2, FL / 2 + 0.9, rz, rail);
-    h.collider(PX1 + rampL / 2, rz, rampL / 2, 0.04, 0, 1.4);
-    for (let k = 0; k <= 4; k++) h.box(0.06, 1.0, 0.06, PX1 + (k * rampL) / 4, FL * (1 - k / 4) + 0.45, rz, M.trim, { shadow: false });
+    h.box(rampL, 0.05, 0.05, RE + (rs * rampL) / 2, FL / 2 + 0.9, rz, rail);
+    h.collider(RE + (rs * rampL) / 2, rz, rampL / 2, 0.04, 0, 1.4);
+    for (let k = 0; k <= 4; k++) h.box(0.06, 1.0, 0.06, RE + (rs * k * rampL) / 4, FL * (1 - k / 4) + 0.45, rz, M.trim, { shadow: false });
   }
   // Porch posts, railing (open at the steps and the ramp) and roof
   for (const px of [PX0 + 0.12, -4, doorX - 1.3, doorX + 1.3, 4.5, PX1 - 0.12]) h.box(0.16, 2.75, 0.16, px, FL + 1.375, PZ1 - 0.12, M.trim, { collide: true });
@@ -1602,10 +1639,10 @@ function familyHouse(x, z, rot) {
   };
   railSeg(PX0 + 0.2, doorX - 1.3);
   railSeg(doorX + 1.3, PX1 - 0.2);
-  h.box(0.06, 0.06, rz0 - PZ0, PX1 - 0.03, FL + 0.9, (PZ0 + rz0) / 2, M.trim);
-  h.box(0.06, 0.06, PZ1 - rz1, PX1 - 0.03, FL + 0.9, (rz1 + PZ1) / 2, M.trim);
-  h.collider(PX1 - 0.03, (PZ0 + rz0) / 2, 0.05, (rz0 - PZ0) / 2, FL, FL + 1);
-  h.collider(PX1 - 0.03, (rz1 + PZ1) / 2, 0.05, (PZ1 - rz1) / 2, FL, FL + 1);
+  h.box(0.06, 0.06, rz0 - PZ0, RE - rs * 0.03, FL + 0.9, (PZ0 + rz0) / 2, M.trim);
+  h.box(0.06, 0.06, PZ1 - rz1, RE - rs * 0.03, FL + 0.9, (rz1 + PZ1) / 2, M.trim);
+  h.collider(RE - rs * 0.03, (PZ0 + rz0) / 2, 0.05, (rz0 - PZ0) / 2, FL, FL + 1);
+  h.collider(RE - rs * 0.03, (rz1 + PZ1) / 2, 0.05, (PZ1 - rz1) / 2, FL, FL + 1);
   const porchRoof = h.box(PX1 - PX0 + 0.4, 0.12, PZ1 - PZ0 + 0.6, 0, 0, 0, [M.darkTrim, M.darkTrim, M.shingle, paint(0xe9e3d6), M.darkTrim, M.darkTrim], { localUV: true });
   porchRoof.rotation.x = 0.16;
   porchRoof.position.set(0, FL + 2.95, (PZ0 + PZ1) / 2 + 0.25);
@@ -1635,7 +1672,7 @@ function familyHouse(x, z, rot) {
   h.add(grandpa, swX - 0.3, FL, swZ + 0.05);
   const [gpx, gpz] = h.world(swX, swZ);
   addIcon('family-card-table', gpx, 3.7, gpz);
-  plant(h, PX0 + 0.6, FL, PZ1 - 0.6, 1.0);
+  plant(h, PX1 - 0.6, FL, PZ1 - 0.6, 1.0);
   placeModel(h, 'SheenChair', -6, FL, Z1 + 1.2, 0.3, 1.2);
   placeModel(h, 'Rockingchair_01', -4.7, FL, Z1 + 1.3, -0.3, 1.05);
 
@@ -1799,18 +1836,19 @@ function familyHouse(x, z, rot) {
 // Build the world
 
 const HOUSE = { x: 0, z: -20 }; // family house, front facing the road (south), porch steps 5 m from it
-const DRIVE_X = HOUSE.x + 17;
-const BUS = { x: -13.5, z: roadZ(-13.5) - RW - SHOULDER - 2.2 }; // just west of the front yard
+const DRIVE_X = HOUSE.x - 17; // drive on the west side, up to Dad's ramp
+// Bus stop east of the front walk, its slab right on the road shoulder and square to the road
+const BUS_X = HOUSE.x + 9, BUS_ROT = -Math.atan((4 / 32) * Math.cos((BUS_X - 10) / 32));
+const BUS = { x: BUS_X, z: roadZ(BUS_X) - RW - SHOULDER - 1.7 / Math.cos(BUS_ROT) };
 
 const frontWalk = polyline([[HOUSE.x + 0.25, HOUSE.z + 9.5], [HOUSE.x + 0.25, HOUSE.z + 11.5], [HOUSE.x - 0.5, roadZ(HOUSE.x) - RW]]);
-const busWalk = polyline([[HOUSE.x + 0.25, HOUSE.z + 11.5], [BUS.x + 3.6, BUS.z + 0.2]]);
-const drive = polyline([[DRIVE_X, roadZ(DRIVE_X) - RW + 0.2], [DRIVE_X - 1.5, HOUSE.z + 10], [DRIVE_X - 1.5, HOUSE.z + 3]]);
-const PATHS = [{ pts: frontWalk, w: 0.8 }, { pts: busWalk, w: 0.6 }, { pts: drive, w: 1.8 }];
+const drive = polyline([[DRIVE_X, roadZ(DRIVE_X) - RW + 0.2], [DRIVE_X + 1.5, HOUSE.z + 10], [DRIVE_X + 1.5, HOUSE.z + 3]]);
+const PATHS = [{ pts: frontWalk, w: 0.8 }, { pts: drive, w: 1.8 }];
 const CLEARINGS = [
-  { x: HOUSE.x + 3, z: HOUSE.z, rx: 15, rz: 8 },
-  { x: HOUSE.x + 2, z: HOUSE.z + 11, rx: 14, rz: 5 },
+  { x: HOUSE.x - 3, z: HOUSE.z, rx: 15, rz: 8 },
+  { x: HOUSE.x - 2, z: HOUSE.z + 11, rx: 14, rz: 5 },
   { x: BUS.x, z: BUS.z - 0.5, rx: 6, rz: 4 },
-  { x: 4, z: roadZ(4), rx: 5, rz: 6 }, // keep the spawn view open
+  { x: 1, z: roadZ(1), rx: 5, rz: 6 }, // keep the spawn view open
 ];
 
 buildGround();
@@ -1844,16 +1882,15 @@ function lawn(cx, cz, rx, rz) {
   msh.renderOrder = 1;
   scene.add(msh);
 }
-lawn(HOUSE.x + 2, HOUSE.z + 11, 12, 4.5);
-lawn(HOUSE.x - 2, HOUSE.z - 8, 9, 2.5);
+lawn(HOUSE.x - 2, HOUSE.z + 11, 12, 4.5);
+lawn(HOUSE.x + 2, HOUSE.z - 8, 9, 2.5);
 const gravelPath = M.gravel.clone(); gravelPath.color.set(0xc2b8a8);
 ribbon(frontWalk, -0.75, 0.75, 0.014, M.concrete, [2.5, 2.5]);
-ribbon(busWalk, -0.6, 0.6, 0.0142, gravelPath, [2, 2]);
 ribbon(drive, -1.7, 1.7, 0.013, gravelPath, [2, 2]);
 // Parking pad by Dad's ramp
-ribbon(polyline([[DRIVE_X - 1.5, HOUSE.z + 10], [DRIVE_X - 1.5, HOUSE.z + 2]]), -2.8, 2.8, 0.0135, gravelPath, [2, 2]);
+ribbon(polyline([[DRIVE_X + 1.5, HOUSE.z + 10], [DRIVE_X + 1.5, HOUSE.z + 2]]), -2.8, 2.8, 0.0135, gravelPath, [2, 2]);
 
-const LOGS = [[-15, -22, 0.4, 8, 0.8], [12, 8, 0.3, 10, 0.9], [-9, 7, 2.2, 8, 0.7]];
+const LOGS = [[16, -22, 0.4, 8, 0.8], [12, 8, 0.3, 10, 0.9], [-9, 7, 2.2, 8, 0.7]];
 for (const [lx, lz, lr, len, r] of LOGS) {
   const dx = (Math.cos(lr) * len) / 2, dz = (-Math.sin(lr) * len) / 2;
   PATHS.push({ pts: [[lx - dx, lz - dz], [lx + dx, lz + dz]], w: r });
@@ -1861,7 +1898,7 @@ for (const [lx, lz, lr, len, r] of LOGS) {
 plantForest();
 plantUndergrowth();
 for (const l of LOGS) fallenLog(...l);
-for (const [sx, sz, sr] of [[-12, -17, 1.4], [19, -12, 1.6], [-3, 8, 1.2], [9, -28, 1.8]]) if (clearOf(sx, sz, sr)) stump(sx, sz, sr);
+for (const [sx, sz, sr] of [[14, -16, 1.4], [19, -9, 1.6], [-3, 8, 1.2], [-9, -28, 1.8]]) if (clearOf(sx, sz, sr)) stump(sx, sz, sr);
 // Mossy boulders and an old stump or two
 for (let i = 0, n = 0; i < 400 && n < 9; i++) {
   const [x, z] = inWorld();
@@ -1871,21 +1908,22 @@ for (let i = 0, n = 0; i < 400 && n < 9; i++) {
   if (n % 3 === 0) { placeModel(p, 'tree_stump_01', 0, 0.1, 0, 0, R(1.3, 1.8)); p.collider(0, 0, 0.9, 0.9, 0, 0.9); } else placeModel(p, 'rock_moss_set_01', 0, 0, 0, 0, R(0.5, 0.8));
 }
 lightShafts();
+forestWall();
 
 const family = familyHouse(HOUSE.x, HOUSE.z, 0);
-busStop(BUS.x, BUS.z);
-hydrant(BUS.x + 7, roadZ(BUS.x + 7) - RW - SHOULDER - 0.4);
-mailbox(DRIVE_X + 2.2, roadZ(DRIVE_X + 2) - RW - SHOULDER - 0.2, Math.PI, 'family');
+busStop(BUS.x, BUS.z, BUS_ROT);
+hydrant(HOUSE.x - 5, roadZ(HOUSE.x - 5) - RW - SHOULDER - 0.4);
+mailbox(DRIVE_X - 2.2, roadZ(DRIVE_X - 2) - RW - SHOULDER - 0.2, Math.PI, 'family');
 
 // Dad's old project car, under a tarp in the drive
-const carPlace = new Place(DRIVE_X - 0.7, HOUSE.z + 5, 0.03);
+const carPlace = new Place(DRIVE_X + 0.7, HOUSE.z + 5, -0.03);
 placeModel(carPlace, 'covered_car', 0, 0, 0, 0, 1.0);
 carPlace.collider(0, 0, 0.95, 2.2, 0, 1.4);
 
 // ---------------------------------------------------------------------------
 // Player
 
-const player = { pos: new THREE.Vector3(4, 0, roadZ(4)), y: 0, yaw: 0, pitch: 0.02, vy: 0 };
+const player = { pos: new THREE.Vector3(1, 0, roadZ(1)), y: 0, yaw: 0, pitch: 0.02, vy: 0 };
 const keys = new Set();
 const joy = { x: 0, y: 0 };
 
@@ -1897,7 +1935,7 @@ function viewFrom(place, from, at, lift = 0) {
   return { x, z, y: lift, yaw: Math.atan2(-(ax - x), -(az - z)), pitch: Math.atan2(dy, Math.hypot(ax - x, az - z)) };
 }
 const SPOTS = {
-  start: { x: 4, z: roadZ(4) + 1.5, y: 0, yaw: 0.3, pitch: 0.04 },
+  start: { x: 1, z: roadZ(1) + 1.5, y: 0, yaw: -0.15, pitch: 0.04 },
   bettertalk: viewFrom(family, [5.0, 1.6], [7.6, FL + 1.1, 2.5], FL),
   rubecube: viewFrom(family, [5.0, 1.6], [7.6, FL + 1.1, 2.5], FL),
   'roadway-rivals': viewFrom(family, [-4.9, -1.8], [-5.35, UP + 1.0, -5.6], UP),
@@ -1927,8 +1965,12 @@ function update(dt) {
   const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
   player.pos.x += (-sy * fz + cy * fx) * speed * dt;
   player.pos.z += (-cy * fz - sy * fx) * speed * dt;
-  player.pos.x = THREE.MathUtils.clamp(player.pos.x, BOUNDS.x0, BOUNDS.x1);
-  player.pos.z = THREE.MathUtils.clamp(player.pos.z, BOUNDS.z0, BOUNDS.z1);
+  // Keep the visitor a step inside the forest wall
+  const d = ellipseD(player.pos.x, player.pos.z), dMax = WALL - 0.04;
+  if (d > dMax) {
+    player.pos.x = WORLD_C.x + ((player.pos.x - WORLD_C.x) * dMax) / d;
+    player.pos.z = WORLD_C.z + ((player.pos.z - WORLD_C.z) * dMax) / d;
+  }
   collide(player.pos, player.y);
   const ground = floorAt(player.pos.x, player.pos.z, player.y);
   if (ground >= player.y) { player.y = ground; player.vy = 0; } else {
