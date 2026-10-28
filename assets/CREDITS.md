@@ -70,7 +70,7 @@ The women come from the pack's individual glTF files. The men pack's combined `H
 
 ## Flat colors
 
-The world is drawn in a flat-colored, low-poly style. The surface colors in `js/world.js` (`SURFACE`) are the average colors of Poly Haven CC0 scans the world used to wear (Metasequoia Bark, Mud Forest, Asphalt 02, Gravel Floor 02, Weathered Plank Siding, Roof Slates 02, Wood Floor, Wood Floor Deck, Oak Wood Planks, Interior Tiles, Dirty Carpet, Brushed Concrete) and of the Babylon.js grass texture (CC BY 4.0, © Babylon.js contributors). The models above went through `tools/slim.mjs`, which replaces their textures with average colors, simplifies them and drops their normals; the sky is a gradient built in code, with the upper half of Poly Haven's Forest Slope HDRI (CC0, Greg Zaal) faded in over it as `assets/tex/redwoods_sky.webp` / `redwoods_sky_m.webp`.
+The world is drawn in a flat-colored, low-poly style. The surface colors in `js/world.js` (`SURFACE`) are the average colors of Poly Haven CC0 scans the world used to wear (Metasequoia Bark, Mud Forest, Asphalt 02, Gravel Floor 02, Weathered Plank Siding, Roof Slates 02, Wood Floor, Wood Floor Deck, Oak Wood Planks, Interior Tiles, Dirty Carpet, Brushed Concrete) and of the Babylon.js grass texture (CC BY 4.0, © Babylon.js contributors). The models above went through `tools/slim.mjs`, which replaces their textures with average colors, simplifies them and drops their normals; the sky is a gradient built in code, with the upper half of Poly Haven's Forest Slope HDRI (CC0, Greg Zaal) faded in over it as `assets/tex/redwoods_sky_m.webp`. The same panorama, with a treetop line cut into its top, paints the ring wall around the world (`assets/tex/redwoods_wall.webp` / `redwoods_wall_m.webp`).
 
 ## Code
 
